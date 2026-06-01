@@ -20,7 +20,7 @@
 
 On first start, the Master generates a **self-signed CA** (ECDSA P-384):
 - CA cert is stored in `ca.cert_pem`.
-- CA private key is encrypted with the KEK (`DOCKESTRA_MASTER_KEY`) and stored in `ca.key_enc`.
+- CA private key is encrypted with the KEK (`ORKESTRA_MASTER_KEY`) and stored in `ca.key_enc`.
 - The CA cert is distributed to Agents as part of the `EnrollResponse.ca_bundle_pem`.
   Agents pin this cert for all subsequent TLS connections.
 
@@ -199,11 +199,11 @@ repository). Operators with DBA access can query it directly; the UI provides a 
 
 ## 6. Security Checklist for Deployment
 
-- [ ] `DOCKESTRA_MASTER_KEY` is a random 256-bit value, stored outside the DB (password manager / HSM).
+- [ ] `ORKESTRA_MASTER_KEY` is a random 256-bit value, stored outside the DB (password manager / HSM).
 - [ ] SQLite file and `/etc/orkestra/` directories are readable only by the `orkestra` system user.
 - [ ] Port `:8443` is firewalled to Agent IPs only (or the Master is on a private network).
 - [ ] Port `:9090` is bound to loopback or protected by a scrape-IP allowlist.
 - [ ] TLS cert on `:8080` is valid (Let's Encrypt or internal PKI).
 - [ ] Bootstrap tokens are single-use and have short TTLs (< 1 hour).
 - [ ] Agent hosts' `/var/run/docker.sock` is accessible only to the `orkestra-agent` user.
-- [ ] Regular backups of `orkestra.db` + `DOCKESTRA_MASTER_KEY` to separate secure storage.
+- [ ] Regular backups of `orkestra.db` + `ORKESTRA_MASTER_KEY` to separate secure storage.

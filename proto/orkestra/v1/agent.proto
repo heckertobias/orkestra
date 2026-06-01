@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package orkestra.v1;
 
-option go_package = "github.com/egt/orkestra/internal/shared/gen/orkestra/v1;orkestraV1";
+option go_package = "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1;orkestraV1";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Service

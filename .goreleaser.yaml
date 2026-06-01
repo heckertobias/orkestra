@@ -5,7 +5,8 @@ project_name: orkestra
 before:
   hooks:
     - go mod tidy
-    - go generate ./...
+    - buf generate
+    - sqlc generate
 
 builds:
   - id: master
@@ -15,9 +16,9 @@ builds:
     goarch: [amd64, arm64]
     ldflags:
       - -s -w
-      - -X github.com/egt/orkestra/internal/shared/version.Version={{.Version}}
-      - -X github.com/egt/orkestra/internal/shared/version.Commit={{.Commit}}
-      - -X github.com/egt/orkestra/internal/shared/version.BuildDate={{.Date}}
+      - -X github.com/heckertobias/orkestra/internal/shared/version.Version={{.Version}}
+      - -X github.com/heckertobias/orkestra/internal/shared/version.Commit={{.Commit}}
+      - -X github.com/heckertobias/orkestra/internal/shared/version.BuildDate={{.Date}}
 
   - id: agent
     binary: orkestra-agent
@@ -26,9 +27,9 @@ builds:
     goarch: [amd64, arm64]
     ldflags:
       - -s -w
-      - -X github.com/egt/orkestra/internal/shared/version.Version={{.Version}}
-      - -X github.com/egt/orkestra/internal/shared/version.Commit={{.Commit}}
-      - -X github.com/egt/orkestra/internal/shared/version.BuildDate={{.Date}}
+      - -X github.com/heckertobias/orkestra/internal/shared/version.Version={{.Version}}
+      - -X github.com/heckertobias/orkestra/internal/shared/version.Commit={{.Commit}}
+      - -X github.com/heckertobias/orkestra/internal/shared/version.BuildDate={{.Date}}
 
 archives:
   - id: master-archive
@@ -49,8 +50,8 @@ dockers:
   - id: master-amd64
     ids: [master]
     image_templates:
-      - "ghcr.io/egt/orkestra-master:{{ .Version }}-amd64"
-      - "ghcr.io/egt/orkestra-master:latest-amd64"
+      - "ghcr.io/heckertobias/orkestra-master:{{ .Version }}-amd64"
+      - "ghcr.io/heckertobias/orkestra-master:latest-amd64"
     dockerfile: deploy/docker/Dockerfile.master
     goarch: amd64
     build_flag_templates:
@@ -61,22 +62,22 @@ dockers:
   - id: master-arm64
     ids: [master]
     image_templates:
-      - "ghcr.io/egt/orkestra-master:{{ .Version }}-arm64"
-      - "ghcr.io/egt/orkestra-master:latest-arm64"
+      - "ghcr.io/heckertobias/orkestra-master:{{ .Version }}-arm64"
+      - "ghcr.io/heckertobias/orkestra-master:latest-arm64"
     dockerfile: deploy/docker/Dockerfile.master
     goarch: arm64
     build_flag_templates:
       - "--platform=linux/arm64"
 
 docker_manifests:
-  - name_template: "ghcr.io/egt/orkestra-master:{{ .Version }}"
+  - name_template: "ghcr.io/heckertobias/orkestra-master:{{ .Version }}"
     image_templates:
-      - "ghcr.io/egt/orkestra-master:{{ .Version }}-amd64"
-      - "ghcr.io/egt/orkestra-master:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/egt/orkestra-master:latest"
+      - "ghcr.io/heckertobias/orkestra-master:{{ .Version }}-amd64"
+      - "ghcr.io/heckertobias/orkestra-master:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/heckertobias/orkestra-master:latest"
     image_templates:
-      - "ghcr.io/egt/orkestra-master:latest-amd64"
-      - "ghcr.io/egt/orkestra-master:latest-arm64"
+      - "ghcr.io/heckertobias/orkestra-master:latest-amd64"
+      - "ghcr.io/heckertobias/orkestra-master:latest-arm64"
 
 checksum:
   name_template: "checksums.txt"

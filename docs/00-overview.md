@@ -63,7 +63,7 @@ orkestra fills this gap with a **Master-Agent architecture**:
 
 | Layer | Choice | Rationale |
 |---|---|---|
-| Backend language | **Go** (≥ 1.23) | Single binary, official Docker SDK, `compose-go`, cloud-native ecosystem |
+| Backend language | **Go** (≥ 1.24) | Single binary, official Docker SDK, `compose-go`, cloud-native ecosystem |
 | RPC / API | **ConnectRPC** (`connectrpc.com/connect`) | One protobuf schema serves Agents (gRPC/HTTP2, bidi-stream) **and** browsers (Connect/JSON + server-streaming). No separate gRPC-web proxy needed |
 | Docker control | `github.com/docker/docker/client` (Engine API) | Direct control without CLI subprocess |
 | Compose | `github.com/compose-spec/compose-go/v2` | Official Compose parser → `types.Project` |

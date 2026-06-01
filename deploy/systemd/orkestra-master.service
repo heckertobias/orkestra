@@ -1,6 +1,6 @@
 [Unit]
 Description=orkestra Master — Docker Orchestration Control Plane
-Documentation=https://github.com/egt/orkestra
+Documentation=https://github.com/heckertobias/orkestra
 After=network-online.target
 Wants=network-online.target
 

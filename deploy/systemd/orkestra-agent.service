@@ -1,6 +1,6 @@
 [Unit]
 Description=orkestra Agent — Docker Host Controller
-Documentation=https://github.com/egt/orkestra
+Documentation=https://github.com/heckertobias/orkestra
 After=docker.service network-online.target
 Wants=docker.service network-online.target
 

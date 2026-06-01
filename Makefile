@@ -2,9 +2,9 @@
 
 # ─── Build targets ────────────────────────────────────────────────────────────
 
-LDFLAGS := -X github.com/egt/orkestra/internal/shared/version.Version=$(shell git describe --tags --always 2>/dev/null || echo dev) \
-           -X github.com/egt/orkestra/internal/shared/version.Commit=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown) \
-           -X github.com/egt/orkestra/internal/shared/version.BuildDate=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS := -X github.com/heckertobias/orkestra/internal/shared/version.Version=$(shell git describe --tags --always 2>/dev/null || echo dev) \
+           -X github.com/heckertobias/orkestra/internal/shared/version.Commit=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown) \
+           -X github.com/heckertobias/orkestra/internal/shared/version.BuildDate=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 all: proto sqlc web build
 

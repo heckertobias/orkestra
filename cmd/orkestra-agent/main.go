@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/egt/orkestra/internal/shared/version"
+	"github.com/heckertobias/orkestra/internal/shared/version"
 )
 
 func main() {
@@ -31,8 +31,8 @@ func main() {
 func runServe(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	var (
-		dataDir  = fs.String("data-dir", envOrDefault("DOCKESTRA_AGENT_DATA", "/etc/orkestra/agent"), "Agent data directory")
-		logLevel = fs.String("log-level", envOrDefault("DOCKESTRA_LOG_LEVEL", "info"), "Log level")
+		dataDir  = fs.String("data-dir", envOrDefault("ORKESTRA_AGENT_DATA", "/etc/orkestra/agent"), "Agent data directory")
+		logLevel = fs.String("log-level", envOrDefault("ORKESTRA_LOG_LEVEL", "info"), "Log level")
 	)
 	_ = fs.Parse(args)
 
@@ -59,8 +59,8 @@ func runEnroll(args []string) {
 		masterAddr     = fs.String("master", "", "Master address (required)")
 		bootstrapToken = fs.String("bootstrap-token", "", "Bootstrap token (required)")
 		name           = fs.String("name", "", "Human-readable server name")
-		dataDir        = fs.String("data-dir", envOrDefault("DOCKESTRA_AGENT_DATA", "/etc/orkestra/agent"), "Agent data directory")
-		logLevel       = fs.String("log-level", envOrDefault("DOCKESTRA_LOG_LEVEL", "info"), "Log level")
+		dataDir        = fs.String("data-dir", envOrDefault("ORKESTRA_AGENT_DATA", "/etc/orkestra/agent"), "Agent data directory")
+		logLevel       = fs.String("log-level", envOrDefault("ORKESTRA_LOG_LEVEL", "info"), "Log level")
 	)
 	_ = fs.Parse(args)
 

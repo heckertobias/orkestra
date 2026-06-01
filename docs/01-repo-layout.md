@@ -47,7 +47,7 @@ orkestra/
 ├── buf.gen.yaml                 # buf codegen config (Go + TypeScript plugins)
 ├── Makefile                     # Developer shortcuts
 ├── .goreleaser.yaml             # Release builds (amd64/arm64 binaries + Docker images)
-└── .gitlab-ci.yml               # CI pipeline (egt cicd-components)
+└── .github/workflows/           # CI/CD pipeline (GitHub Actions)
 ```
 
 ---
@@ -86,7 +86,7 @@ See [05-secrets.md](05-secrets.md).
 ### Prerequisites
 
 ```
-go      >= 1.23
+go      >= 1.24
 buf     >= 1.30      (protobuf codegen)
 node    >= 20        (web UI build)
 sqlc    >= 1.26      (SQL → Go codegen)
@@ -115,8 +115,8 @@ goreleaser           (release builds)
 1. `protoc-gen-go` + `protoc-gen-connect-go` → `internal/shared/gen/`
 2. `protoc-gen-es` + `protoc-gen-connect-es` → `web/gen/`
 
-Both are checked into the repo so that building only requires Go + buf (no Node needed for the
-backend build).
+Both directories are gitignored and regenerated via `make proto` / `make sqlc` (locally) or in
+CI before the build step. The backend build needs only Go + buf (no Node needed for the backend).
 
 ### Embedding the Web UI
 
@@ -138,5 +138,5 @@ In dev mode (build tag `dev`), the Master proxies to the Vite dev server (`local
 
 `goreleaser` produces:
 - `orkestra-master_{os}_{arch}` and `orkestra-agent_{os}_{arch}` for linux/amd64 and linux/arm64.
-- Docker images `ghcr.io/egt/orkestra-master:{version}`.
+- Docker images `ghcr.io/heckertobias/orkestra-master:{version}`.
 - A checksum file and systemd unit files as release assets.

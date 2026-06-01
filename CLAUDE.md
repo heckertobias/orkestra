@@ -31,7 +31,8 @@ go test ./internal/master/store/ -run TestName -v
 
 ## Code generation — run after editing schemas
 
-Generated code is committed to the repo. After changing the relevant source you MUST regenerate:
+Generated directories (`internal/shared/gen/`, `web/gen/`) are gitignored and regenerated locally
+or in CI. After changing the relevant source you MUST regenerate:
 
 - Edit any `proto/orkestra/v1/*.proto` → `make proto` (`buf generate`). Outputs Go to
   `internal/shared/gen/` and TypeScript Connect clients to `web/gen/`. Lint protos with `buf lint`.
@@ -90,13 +91,11 @@ server.
 
 ## Conventions & gotchas
 
-- **Module path is `github.com/egt/orkestra`** and **runtime env vars use the `DOCKESTRA_` prefix**
-  (e.g. `DOCKESTRA_UI_ADDR`, `DOCKESTRA_AGENT_ADDR`, `DOCKESTRA_AGENT_DATA`, `DOCKESTRA_MASTER_KEY`).
-  These are pre-rename leftovers — keep them consistent with existing code; don't rename
-  piecemeal.
+- **Module path is `github.com/heckertobias/orkestra`** and **runtime env vars use the `ORKESTRA_` prefix**
+  (e.g. `ORKESTRA_UI_ADDR`, `ORKESTRA_AGENT_ADDR`, `ORKESTRA_AGENT_DATA`, `ORKESTRA_MASTER_KEY`).
 - The agent binary is subcommand-based: `orkestra-agent serve|enroll`. The master takes flags only.
 - Default ports: `8443` Agent gRPC (mTLS, HTTP/2), `8080` UI/API, `9090` Prometheus metrics.
 - Structured logging via stdlib `log/slog`; version info is injected at build time via `-ldflags`
   into `internal/shared/version`.
-- Secrets at rest are encrypted with a KEK derived from `DOCKESTRA_MASTER_KEY`; the CA private key
+- Secrets at rest are encrypted with a KEK derived from `ORKESTRA_MASTER_KEY`; the CA private key
   and secret ciphertext are never stored in plaintext.

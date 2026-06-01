@@ -74,7 +74,7 @@ and injected via dependency injection into every component that needs it.
 
 ### Encryption
 
-- Key material: `DOCKESTRA_MASTER_KEY` (hex-encoded 256-bit key from env or file).
+- Key material: `ORKESTRA_MASTER_KEY` (hex-encoded 256-bit key from env or file).
 - Algorithm: **NaCl secretbox** (`golang.org/x/crypto/nacl/secretbox` — XSalsa20-Poly1305).
 - Each value is encrypted as: `nonce (24 bytes) || ciphertext`, stored in `secrets.ciphertext`.
 - The KEK is never stored in the database. Losing it makes all builtin secrets unrecoverable.
@@ -234,7 +234,7 @@ The `secret_refs` column in `stack_versions` is a JSON array:
 
 Back up both:
 - The SQLite database file (`orkestra.db`).
-- The `DOCKESTRA_MASTER_KEY` value (keep separately — e.g. in a password manager or HSM).
+- The `ORKESTRA_MASTER_KEY` value (keep separately — e.g. in a password manager or HSM).
 
 Without the KEK, the ciphertexts in the DB are unrecoverable.
 

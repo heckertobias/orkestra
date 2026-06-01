@@ -17,7 +17,7 @@ NAME=""
 VERSION="latest"
 DATA_DIR="/etc/orkestra/agent"
 BINARY_PATH="/usr/local/bin/orkestra-agent"
-GITHUB_REPO="egt/orkestra"
+GITHUB_REPO="heckertobias/orkestra"
 
 # ─── Parse args ───────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -88,9 +88,9 @@ echo "Enrolling agent with master at ${MASTER}..."
 # Write env file
 mkdir -p /etc/orkestra/agent
 cat > /etc/orkestra/agent/env <<EOF
-DOCKESTRA_MASTER_ADDR=${MASTER}
-DOCKESTRA_AGENT_DATA=${DATA_DIR}
-DOCKESTRA_LOG_LEVEL=info
+ORKESTRA_MASTER_ADDR=${MASTER}
+ORKESTRA_AGENT_DATA=${DATA_DIR}
+ORKESTRA_LOG_LEVEL=info
 EOF
 chmod 600 /etc/orkestra/agent/env
 

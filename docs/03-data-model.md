@@ -29,7 +29,7 @@ CREATE TABLE enrollment_tokens (
   ttl_seconds  INTEGER NOT NULL,
   max_uses     INTEGER NOT NULL DEFAULT 1,
   used_count   INTEGER NOT NULL DEFAULT 0,
-  created_by   TEXT    NOT NULL REFERENCES users(id),
+  created_by   TEXT    REFERENCES users(id),  -- nullable: first token may be created before any user exists
   created_at   INTEGER NOT NULL,
   expires_at   INTEGER NOT NULL,
   revoked      INTEGER NOT NULL DEFAULT 0
@@ -202,7 +202,7 @@ CREATE TABLE role_bindings (
 
 -- Web sessions
 CREATE TABLE sessions (
-  id         TEXT    PRIMARY KEY,  -- random 256-bit token (stored as cookie)
+  id         TEXT    PRIMARY KEY,  -- SHA-256 of the raw session token (raw token sent as cookie only, never stored in DB)
   user_id    TEXT    NOT NULL REFERENCES users(id),
   created_at INTEGER NOT NULL,
   expires_at INTEGER NOT NULL,
@@ -278,7 +278,7 @@ is handled in Go code.
 
 ### KEK (Key-Encrypting Key)
 
-The `DOCKESTRA_MASTER_KEY` environment variable (or file path) provides the KEK used to encrypt:
+The `ORKESTRA_MASTER_KEY` environment variable (or file path) provides the KEK used to encrypt:
 - `ca.key_enc` (CA private key)
 - `secrets.ciphertext` (builtin secret values)
 - `oidc_config.client_secret_enc`

@@ -3,7 +3,7 @@ managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      value: github.com/egt/orkestra/internal/shared/gen
+      value: github.com/heckertobias/orkestra/internal/shared/gen
 plugins:
   # Go: protobuf + Connect
   - remote: buf.build/protocolbuffers/go

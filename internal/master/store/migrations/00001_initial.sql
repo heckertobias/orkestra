@@ -40,7 +40,7 @@ CREATE TABLE certificates (
 );
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- Users (referenced by enrollment_tokens FK above, so declared first)
+-- Users (SQLite resolves FK references at runtime, not at DDL time)
 -- ─────────────────────────────────────────────────────────────────────────────
 
 CREATE TABLE users (

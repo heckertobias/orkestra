@@ -60,8 +60,8 @@ The React SPA is embedded into the Master binary via `go:embed` — one artifact
 ### Master (Docker Compose)
 
 ```bash
-export DOCKESTRA_MASTER_KEY=$(openssl rand -hex 32)
-echo "DOCKESTRA_MASTER_KEY=$DOCKESTRA_MASTER_KEY" >> .env
+export ORKESTRA_MASTER_KEY=$(openssl rand -hex 32)
+echo "ORKESTRA_MASTER_KEY=$ORKESTRA_MASTER_KEY" >> .env
 # Store the key somewhere safe — it encrypts all secrets at rest.
 
 docker compose -f deploy/docker/compose.yaml up -d

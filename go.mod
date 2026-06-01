@@ -1,3 +1,3 @@
-module github.com/egt/orkestra
+module github.com/heckertobias/orkestra
 
 go 1.24.4

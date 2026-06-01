@@ -6,19 +6,19 @@
 
 **Goal:** A buildable, testable skeleton with all tooling wired up.
 
-- [ ] Go module init (`go mod init github.com/egt/orkestra`)
-- [ ] Directory structure as per [01-repo-layout.md](01-repo-layout.md)
-- [ ] `buf.yaml` + `buf.gen.yaml` (Go + TS codegen plugins)
-- [ ] Skeleton `.proto` files (services declared, messages stubbed)
+- [x] Go module init (`go mod init github.com/heckertobias/orkestra`)
+- [x] Directory structure as per [01-repo-layout.md](01-repo-layout.md)
+- [x] `buf.yaml` + `buf.gen.yaml` (Go + TS codegen plugins)
+- [x] Skeleton `.proto` files (services declared, messages stubbed)
 - [ ] First `buf generate` pass → `internal/shared/gen/` + `web/gen/`
-- [ ] SQLite setup: `modernc.org/sqlite`, WAL pragma, goose migrations directory
-- [ ] First migration: `CREATE TABLE` statements for `ca`, `servers`, `enrollment_tokens`
-- [ ] `sqlc.yaml` + first `sqlc generate` pass
-- [ ] `Makefile` with `proto`, `sqlc`, `build`, `test`, `lint`, `web`, `migrate` targets
-- [ ] `cmd/orkestra-master/main.go` — starts HTTP server, serves `GET /healthz`
-- [ ] `cmd/orkestra-agent/main.go` — starts, logs "waiting for enrollment"
-- [ ] `go test ./...` passes (no tests yet, but no compilation errors)
-- [ ] `.gitlab-ci.yml` (egt cicd-components, go template, build + test + lint)
+- [x] SQLite setup: `modernc.org/sqlite`, WAL pragma, goose migrations directory
+- [x] First migration: full schema (all tables)
+- [x] `sqlc.yaml` + SQL query files
+- [x] `Makefile` with `proto`, `sqlc`, `build`, `test`, `lint`, `web`, `migrate` targets
+- [x] `cmd/orkestra-master/main.go` — starts HTTP server, serves `GET /healthz`
+- [x] `cmd/orkestra-agent/main.go` — starts, logs "waiting for enrollment"
+- [x] `go test ./...` passes (no tests yet, but no compilation errors)
+- [x] `.github/workflows/ci.yml` (GitHub Actions, build + test + lint)
 - [ ] `web/` Vite + React + TypeScript scaffold (`npm create vite`)
 
 **Result:** Both binaries compile and the CI pipeline is green.

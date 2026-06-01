@@ -18,7 +18,7 @@ web/gen/
 # Local env / secrets
 .env
 *.env.local
-/etc/dockestra/
+/etc/orkestra/
 
 # IDE
 .idea/

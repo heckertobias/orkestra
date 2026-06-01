@@ -11,14 +11,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/egt/orkestra/internal/shared/version"
+	"github.com/heckertobias/orkestra/internal/shared/version"
 )
 
 func main() {
 	var (
-		uiAddr    = flag.String("ui-addr", envOrDefault("DOCKESTRA_UI_ADDR", "0.0.0.0:8080"), "UI & API listen address")
-		agentAddr = flag.String("agent-addr", envOrDefault("DOCKESTRA_AGENT_ADDR", "0.0.0.0:8443"), "Agent gRPC listen address")
-		logLevel  = flag.String("log-level", envOrDefault("DOCKESTRA_LOG_LEVEL", "info"), "Log level (debug|info|warn|error)")
+		uiAddr    = flag.String("ui-addr", envOrDefault("ORKESTRA_UI_ADDR", "0.0.0.0:8080"), "UI & API listen address")
+		agentAddr = flag.String("agent-addr", envOrDefault("ORKESTRA_AGENT_ADDR", "0.0.0.0:8443"), "Agent gRPC listen address")
+		logLevel  = flag.String("log-level", envOrDefault("ORKESTRA_LOG_LEVEL", "info"), "Log level (debug|info|warn|error)")
 	)
 	flag.Parse()
 
