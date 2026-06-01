@@ -1,0 +1,9 @@
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY dockestra-master /usr/local/bin/dockestra-master
+
+EXPOSE 8080 8443
+
+VOLUME ["/data"]
+
+ENTRYPOINT ["/usr/local/bin/dockestra-master"]

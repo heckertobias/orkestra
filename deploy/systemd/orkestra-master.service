@@ -1,0 +1,33 @@
+[Unit]
+Description=orkestra Master — Docker Orchestration Control Plane
+Documentation=https://github.com/egt/orkestra
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orkestra
+Group=orkestra
+ExecStart=/usr/local/bin/orkestra-master
+EnvironmentFile=-/etc/orkestra/master/env
+Restart=on-failure
+RestartSec=5s
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/orkestra
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictRealtime=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=orkestra-master
+
+[Install]
+WantedBy=multi-user.target

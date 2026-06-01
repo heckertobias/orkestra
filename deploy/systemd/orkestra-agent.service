@@ -1,0 +1,23 @@
+[Unit]
+Description=orkestra Agent — Docker Host Controller
+Documentation=https://github.com/egt/orkestra
+After=docker.service network-online.target
+Wants=docker.service network-online.target
+
+[Service]
+Type=simple
+# Requires Docker socket access. If the Docker socket is in the 'docker' group,
+# use 'User=orkestra' with 'SupplementaryGroups=docker' instead of root.
+User=root
+ExecStart=/usr/local/bin/orkestra-agent serve
+EnvironmentFile=-/etc/orkestra/agent/env
+Restart=on-failure
+RestartSec=10s
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=orkestra-agent
+
+[Install]
+WantedBy=multi-user.target

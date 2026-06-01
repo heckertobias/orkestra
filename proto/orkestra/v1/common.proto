@@ -1,0 +1,8 @@
+syntax = "proto3";
+
+package orkestra.v1;
+
+option go_package = "github.com/egt/orkestra/internal/shared/gen/orkestrap/v1;orkestraV1";
+
+// Empty placeholder used before google/protobuf/empty.proto is imported.
+message Empty {}

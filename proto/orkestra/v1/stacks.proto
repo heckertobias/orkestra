@@ -1,0 +1,239 @@
+syntax = "proto3";
+
+package orkestra.v1;
+
+option go_package = "github.com/egt/orkestra/internal/shared/gen/orkestra/v1;orkestraV1";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stacks Service — UI API
+// ─────────────────────────────────────────────────────────────────────────────
+
+service StackService {
+  // Servers
+  rpc ListServers(ListServersRequest)     returns (ListServersResponse);
+  rpc GetServer(GetServerRequest)         returns (Server);
+  rpc UpdateServer(UpdateServerRequest)   returns (Server);
+  rpc DeleteServer(DeleteServerRequest)   returns (Empty);
+
+  // Stacks
+  rpc ListStacks(ListStacksRequest)       returns (ListStacksResponse);
+  rpc GetStack(GetStackRequest)           returns (Stack);
+  rpc CreateStack(CreateStackRequest)     returns (Stack);
+  rpc UpdateStack(UpdateStackRequest)     returns (StackVersion); // creates immutable new version
+  rpc DeleteStack(DeleteStackRequest)     returns (Empty);
+
+  // Versions & Assignments
+  rpc ListStackVersions(ListStackVersionsRequest) returns (ListStackVersionsResponse);
+  rpc AssignStack(AssignStackRequest)             returns (Assignment);
+  rpc UnassignStack(UnassignStackRequest)         returns (Empty);
+  rpc RollbackStack(RollbackStackRequest)         returns (Assignment);
+
+  // Container control (forwarded to Agent)
+  rpc ExecOnContainer(ExecOnContainerRequest) returns (ExecOnContainerResponse);
+
+  // Live streams (server-streaming, bridged from Agent streams)
+  rpc StreamLogs(StreamLogsRequest)     returns (stream LogLine);
+  rpc StreamStats(StreamStatsRequest)   returns (stream ServerStats);
+  rpc StreamEvents(StreamEventsRequest) returns (stream Event);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Server messages
+// ─────────────────────────────────────────────────────────────────────────────
+
+message Server {
+  string              id             = 1;
+  string              name           = 2;
+  string              hostname       = 3;
+  string              arch           = 4;
+  string              os             = 5;
+  string              agent_version  = 6;
+  string              docker_version = 7;
+  map<string, string> labels         = 8;
+  string              status         = 9;  // online | offline
+  int64               last_seen_at   = 10; // Unix ms
+  int64               enrolled_at    = 11;
+  repeated Assignment assignments    = 12;
+}
+
+message ListServersRequest {
+  map<string, string> label_selector = 1; // optional label filter
+  bool                include_deleted = 2;
+}
+
+message ListServersResponse {
+  repeated Server servers = 1;
+}
+
+message GetServerRequest   { string id = 1; }
+message DeleteServerRequest { string id = 1; }
+
+message UpdateServerRequest {
+  string              id     = 1;
+  string              name   = 2;
+  map<string, string> labels = 3;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stack messages
+// ─────────────────────────────────────────────────────────────────────────────
+
+message Stack {
+  string id          = 1;
+  string name        = 2;
+  string description = 3;
+  string owner_id    = 4;
+  int32  version     = 5; // latest version number
+  int64  created_at  = 6;
+}
+
+message StackVersion {
+  string              id           = 1;
+  string              stack_id     = 2;
+  int32               version      = 3;
+  string              compose_yaml = 4;
+  map<string, string> env_vars     = 5;
+  repeated SecretRef  secret_refs  = 6;
+  string              created_by   = 7;
+  int64               created_at   = 8;
+}
+
+message SecretRef {
+  string name         = 1;
+  string secret_id    = 2;
+  string service_name = 3; // empty = all services
+  string target       = 4; // env | file | docker_secret
+  string env_key      = 5;
+  string file_path    = 6;
+}
+
+message Assignment {
+  string id               = 1;
+  string server_id        = 2;
+  string stack_id         = 3;
+  string stack_version_id = 4;
+  int32  version          = 5;
+  string desired_status   = 6; // running | stopped | removed
+  string assigned_by      = 7;
+  int64  assigned_at      = 8;
+}
+
+message ListStacksRequest  { bool include_deleted = 1; }
+message ListStacksResponse { repeated Stack stacks = 1; }
+message GetStackRequest    { string id = 1; }
+message DeleteStackRequest { string id = 1; }
+
+message CreateStackRequest {
+  string              name         = 1;
+  string              description  = 2;
+  string              compose_yaml = 3;
+  map<string, string> env_vars     = 4;
+  repeated SecretRef  secret_refs  = 5;
+}
+
+message UpdateStackRequest {
+  string              id           = 1;
+  string              description  = 2; // optional — only metadata changes if compose_yaml empty
+  string              compose_yaml = 3;
+  map<string, string> env_vars     = 4;
+  repeated SecretRef  secret_refs  = 5;
+}
+
+message ListStackVersionsRequest  { string stack_id = 1; }
+message ListStackVersionsResponse { repeated StackVersion versions = 1; }
+
+message AssignStackRequest {
+  string server_id        = 1;
+  string stack_id         = 2;
+  string stack_version_id = 3; // if empty, uses latest
+  string desired_status   = 4; // default: running
+}
+
+message UnassignStackRequest {
+  string server_id = 1;
+  string stack_id  = 2;
+}
+
+message RollbackStackRequest {
+  string server_id        = 1;
+  string stack_id         = 2;
+  string stack_version_id = 3; // target version to roll back to
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Container control
+// ─────────────────────────────────────────────────────────────────────────────
+
+message ExecOnContainerRequest {
+  string   server_id    = 1;
+  string   container_id = 2;
+  string   command_type = 3; // start | stop | restart | pull | remove | exec | prune
+  repeated string args  = 4;
+}
+
+message ExecOnContainerResponse {
+  bool   success = 1;
+  string output  = 2;
+  string error   = 3;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Live stream messages
+// ─────────────────────────────────────────────────────────────────────────────
+
+message StreamLogsRequest {
+  string server_id    = 1;
+  string container_id = 2;
+  bool   follow       = 3;
+  string since        = 4;
+  int32  tail         = 5;
+  bool   timestamps   = 6;
+}
+
+message LogLine {
+  string stream    = 1; // stdout | stderr
+  string text      = 2;
+  int64  timestamp = 3;
+}
+
+message StreamStatsRequest {
+  string server_id = 1;
+}
+
+message ServerStats {
+  string              server_id  = 1;
+  repeated ContainerStatEntry containers = 2;
+  int64               timestamp  = 3;
+}
+
+message ContainerStatEntry {
+  string container_id = 1;
+  string service_name = 2;
+  double cpu_percent  = 3;
+  int64  memory_usage = 4;
+  int64  memory_limit = 5;
+  int64  net_rx_bytes = 6;
+  int64  net_tx_bytes = 7;
+}
+
+message StreamEventsRequest {
+  string server_id = 1; // optional — empty = all servers
+  string stack_id  = 2; // optional
+}
+
+message Event {
+  int64  id           = 1;
+  int64  ts           = 2;
+  string server_id    = 3;
+  string stack_id     = 4;
+  string event_type   = 5; // docker | deploy | reconcile | agent
+  string severity     = 6; // info | warn | error
+  string message      = 7;
+  string detail_json  = 8;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared
+// ─────────────────────────────────────────────────────────────────────────────
+
+message Empty {}

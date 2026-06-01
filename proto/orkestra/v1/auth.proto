@@ -1,0 +1,140 @@
+syntax = "proto3";
+
+package orkestra.v1;
+
+option go_package = "github.com/egt/orkestra/internal/shared/gen/orkestra/v1;orkestraV1";
+
+service AuthService {
+  // Session auth
+  rpc Login(LoginRequest)                 returns (LoginResponse);
+  rpc Logout(AuthEmpty)                   returns (AuthEmpty);
+  rpc GetCurrentUser(AuthEmpty)           returns (User);
+
+  // User management (admin)
+  rpc ListUsers(ListUsersRequest)         returns (ListUsersResponse);
+  rpc CreateUser(CreateUserRequest)       returns (User);
+  rpc UpdateUser(UpdateUserRequest)       returns (User);
+  rpc DeleteUser(DeleteUserRequest)       returns (AuthEmpty);
+  rpc ResetPassword(ResetPasswordRequest) returns (AuthEmpty);
+
+  // Role bindings (admin)
+  rpc ListRoleBindings(ListRoleBindingsRequest) returns (ListRoleBindingsResponse);
+  rpc AssignRole(AssignRoleRequest)             returns (RoleBinding);
+  rpc RevokeRole(RevokeRoleRequest)             returns (AuthEmpty);
+
+  // OIDC config (admin)
+  rpc GetOIDCConfig(AuthEmpty)                  returns (OIDCConfig);
+  rpc UpdateOIDCConfig(UpdateOIDCConfigRequest) returns (OIDCConfig);
+
+  // Enrollment tokens (admin/operator)
+  rpc ListEnrollmentTokens(AuthEmpty)                      returns (ListEnrollmentTokensResponse);
+  rpc CreateEnrollmentToken(CreateEnrollmentTokenRequest)  returns (EnrollmentToken);
+  rpc RevokeEnrollmentToken(RevokeEnrollmentTokenRequest)  returns (AuthEmpty);
+}
+
+message User {
+  string id            = 1;
+  string username      = 2;
+  string display_name  = 3;
+  bool   has_password  = 4; // false for OIDC-only users
+  bool   has_oidc      = 5;
+  bool   disabled      = 6;
+  int64  created_at    = 7;
+  int64  last_login_at = 8;
+  repeated string roles = 9; // effective global roles
+}
+
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  User   user       = 1;
+  // Session token is set as an httponly cookie by the server; not included here.
+  string session_id = 2; // for API clients that can't use cookies
+}
+
+message ListUsersRequest  { bool include_disabled = 1; }
+message ListUsersResponse { repeated User users = 1; }
+message DeleteUserRequest { string id = 1; }
+
+message CreateUserRequest {
+  string username     = 1;
+  string display_name = 2;
+  string password     = 3;
+}
+
+message UpdateUserRequest {
+  string id           = 1;
+  string display_name = 2;
+  bool   disabled     = 3;
+}
+
+message ResetPasswordRequest {
+  string user_id      = 1;
+  string new_password = 2;
+}
+
+message RoleBinding {
+  string id        = 1;
+  string user_id   = 2;
+  string role      = 3; // admin | operator | viewer
+  string server_id = 4; // optional scope
+  string stack_id  = 5; // optional scope
+  int64  created_at = 6;
+}
+
+message ListRoleBindingsRequest  { string user_id = 1; }
+message ListRoleBindingsResponse { repeated RoleBinding bindings = 1; }
+
+message AssignRoleRequest {
+  string user_id   = 1;
+  string role      = 2;
+  string server_id = 3;
+  string stack_id  = 4;
+}
+
+message RevokeRoleRequest { string binding_id = 1; }
+
+message OIDCConfig {
+  bool   enabled        = 1;
+  string issuer_url     = 2;
+  string client_id      = 3;
+  // client_secret is write-only; not returned
+  repeated string scopes = 4;
+  map<string, string> claim_mapping = 5; // claim value → role
+}
+
+message UpdateOIDCConfigRequest {
+  bool   enabled        = 1;
+  string issuer_url     = 2;
+  string client_id      = 3;
+  string client_secret  = 4; // write-only
+  repeated string scopes = 5;
+  map<string, string> claim_mapping = 6;
+}
+
+message EnrollmentToken {
+  string id          = 1;
+  string description = 2;
+  int32  ttl_seconds = 3;
+  int32  max_uses    = 4;
+  int32  used_count  = 5;
+  int64  expires_at  = 6;
+  int64  created_at  = 7;
+  bool   revoked     = 8;
+  string raw_token   = 9; // only set on create response (shown once)
+}
+
+message ListEnrollmentTokensResponse { repeated EnrollmentToken tokens = 1; }
+
+message CreateEnrollmentTokenRequest {
+  string description = 1;
+  int32  ttl_seconds = 2;
+  int32  max_uses    = 3;
+}
+
+message RevokeEnrollmentTokenRequest { string id = 1; }
+
+message AuthEmpty {}

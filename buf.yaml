@@ -1,0 +1,11 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  except:
+    - PACKAGE_VERSION_SUFFIX  # we use v1 in path but package name is orkestra.v1 — acceptable
+breaking:
+  use:
+    - FILE

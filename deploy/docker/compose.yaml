@@ -1,0 +1,28 @@
+services:
+  master:
+    image: ghcr.io/egt/orkestra-master:latest
+    restart: unless-stopped
+    ports:
+      - "8443:8443"   # Agent gRPC (mTLS)
+      - "8080:8080"   # Web UI + API
+    volumes:
+      - orkestra-data:/data
+      # Uncomment to provide a TLS cert for the UI endpoint:
+      # - ./tls:/tls:ro
+    environment:
+      DOCKESTRA_MASTER_KEY: "${DOCKESTRA_MASTER_KEY}"
+      DOCKESTRA_DB_PATH: /data/orkestra.db
+      DOCKESTRA_AGENT_ADDR: "0.0.0.0:8443"
+      DOCKESTRA_UI_ADDR: "0.0.0.0:8080"
+      DOCKESTRA_LOG_LEVEL: info
+      # DOCKESTRA_TLS_CERT: /tls/server.crt
+      # DOCKESTRA_TLS_KEY:  /tls/server.key
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/orkestra-master", "--healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  orkestra-data:

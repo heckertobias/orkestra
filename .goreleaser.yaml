@@ -1,0 +1,90 @@
+version: 2
+
+project_name: orkestra
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: master
+    binary: orkestra-master
+    main: ./cmd/orkestra-master
+    goos: [linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X github.com/egt/orkestra/internal/shared/version.Version={{.Version}}
+      - -X github.com/egt/orkestra/internal/shared/version.Commit={{.Commit}}
+      - -X github.com/egt/orkestra/internal/shared/version.BuildDate={{.Date}}
+
+  - id: agent
+    binary: orkestra-agent
+    main: ./cmd/orkestra-agent
+    goos: [linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X github.com/egt/orkestra/internal/shared/version.Version={{.Version}}
+      - -X github.com/egt/orkestra/internal/shared/version.Commit={{.Commit}}
+      - -X github.com/egt/orkestra/internal/shared/version.BuildDate={{.Date}}
+
+archives:
+  - id: master-archive
+    builds: [master]
+    name_template: "orkestra-master_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - deploy/systemd/orkestra-master.service
+      - deploy/docker/**
+
+  - id: agent-archive
+    builds: [agent]
+    name_template: "orkestra-agent_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - deploy/systemd/orkestra-agent.service
+      - deploy/install-agent.sh
+
+dockers:
+  - id: master-amd64
+    ids: [master]
+    image_templates:
+      - "ghcr.io/egt/orkestra-master:{{ .Version }}-amd64"
+      - "ghcr.io/egt/orkestra-master:latest-amd64"
+    dockerfile: deploy/docker/Dockerfile.master
+    goarch: amd64
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.revision={{.Commit}}"
+
+  - id: master-arm64
+    ids: [master]
+    image_templates:
+      - "ghcr.io/egt/orkestra-master:{{ .Version }}-arm64"
+      - "ghcr.io/egt/orkestra-master:latest-arm64"
+    dockerfile: deploy/docker/Dockerfile.master
+    goarch: arm64
+    build_flag_templates:
+      - "--platform=linux/arm64"
+
+docker_manifests:
+  - name_template: "ghcr.io/egt/orkestra-master:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/egt/orkestra-master:{{ .Version }}-amd64"
+      - "ghcr.io/egt/orkestra-master:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/egt/orkestra-master:latest"
+    image_templates:
+      - "ghcr.io/egt/orkestra-master:latest-amd64"
+      - "ghcr.io/egt/orkestra-master:latest-arm64"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

@@ -1,0 +1,233 @@
+syntax = "proto3";
+
+package orkestra.v1;
+
+option go_package = "github.com/egt/orkestra/internal/shared/gen/orkestra/v1;orkestraV1";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Service
+// ─────────────────────────────────────────────────────────────────────────────
+
+service AgentService {
+  // One-time enrollment — server TLS only (no client cert yet), token proves identity.
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+
+  // Persistent bidirectional stream — requires mTLS after enrollment.
+  rpc Connect(stream AgentMessage) returns (stream MasterMessage);
+
+  // Agent renews its cert before expiry — requires mTLS with current cert.
+  rpc RenewCert(RenewCertRequest) returns (RenewCertResponse);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Master → Agent messages
+// ─────────────────────────────────────────────────────────────────────────────
+
+message MasterMessage {
+  // Correlation ID — the Agent echoes this in its response AgentMessage.
+  string request_id = 15;
+
+  oneof payload {
+    ApplyDesiredState apply_desired_state = 1;
+    ExecCommand       exec_command        = 2;
+    LogRequest        log_request         = 3;
+    StatsRequest      stats_request       = 4;
+    CancelStream      cancel_stream       = 5;
+    Ping              ping                = 6;
+  }
+}
+
+// Full desired state for this server (re-sent on reconnect).
+message ApplyDesiredState {
+  repeated StackDesiredState stacks = 1;
+}
+
+message StackDesiredState {
+  string                  stack_id     = 1;
+  string                  version      = 2;
+  string                  compose_yaml = 3;
+  map<string, string>     env_vars     = 4;
+  repeated ResolvedSecret secrets      = 5;
+  DesiredStatus           status       = 6;
+}
+
+message ResolvedSecret {
+  string       name       = 1; // binding name (env var name or file name)
+  bytes        value      = 2; // plaintext — in-memory only, over mTLS
+  SecretTarget target     = 3;
+  string       env_key    = 4; // if target = ENV
+  string       file_path  = 5; // if target = FILE
+}
+
+enum DesiredStatus {
+  DESIRED_STATUS_UNSPECIFIED = 0;
+  DESIRED_STATUS_RUNNING     = 1;
+  DESIRED_STATUS_STOPPED     = 2;
+  DESIRED_STATUS_REMOVED     = 3;
+}
+
+enum SecretTarget {
+  SECRET_TARGET_UNSPECIFIED   = 0;
+  SECRET_TARGET_ENV           = 1;
+  SECRET_TARGET_FILE          = 2;
+  SECRET_TARGET_DOCKER_SECRET = 3;
+}
+
+message ExecCommand {
+  string      container_id = 1;
+  CommandType type         = 2;
+  repeated string args     = 3; // for EXEC subcommand
+}
+
+enum CommandType {
+  COMMAND_TYPE_UNSPECIFIED = 0;
+  COMMAND_TYPE_START       = 1;
+  COMMAND_TYPE_STOP        = 2;
+  COMMAND_TYPE_RESTART     = 3;
+  COMMAND_TYPE_PULL        = 4;
+  COMMAND_TYPE_REMOVE      = 5;
+  COMMAND_TYPE_EXEC        = 6;
+  COMMAND_TYPE_PRUNE       = 7;
+}
+
+message LogRequest {
+  string stream_id   = 1;
+  string container_id = 2;
+  bool   follow      = 3;
+  string since       = 4; // RFC3339 or relative e.g. "5m"
+  int32  tail        = 5; // 0 = all
+  bool   timestamps  = 6;
+}
+
+message StatsRequest {
+  string          stream_id     = 1;
+  repeated string container_ids = 2; // empty = all managed containers
+}
+
+message CancelStream {
+  string stream_id = 1;
+}
+
+message Ping {
+  int64 timestamp_ms = 1;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Agent → Master messages
+// ─────────────────────────────────────────────────────────────────────────────
+
+message AgentMessage {
+  // Echoed from MasterMessage.request_id for correlation.
+  string request_id = 15;
+
+  oneof payload {
+    Hello         hello          = 1;
+    StatusReport  status_report  = 2;
+    LogChunk      log_chunk      = 3;
+    StatsChunk    stats_chunk    = 4;
+    CommandResult command_result = 5;
+    DockerEvent   docker_event   = 6;
+    Pong          pong           = 7;
+  }
+}
+
+// First message after Connect — identifies the agent and its host.
+message Hello {
+  string agent_id       = 1;
+  string agent_version  = 2;
+  string docker_version = 3;
+  string hostname       = 4;
+  string os             = 5;
+  string arch           = 6;
+  int32  cpu_count      = 7;
+  int64  memory_bytes   = 8;
+}
+
+// Periodic heartbeat (every ~30 s) and response to reconcile results.
+message StatusReport {
+  repeated StackStatus stacks        = 1;
+  int64                reported_at_ms = 2;
+}
+
+message StackStatus {
+  string                   stack_id          = 1;
+  string                   running_version   = 2;
+  repeated ContainerStatus containers        = 3;
+  bool                     drift_detected    = 4;
+  string                   drift_description = 5;
+  string                   error             = 6;
+}
+
+message ContainerStatus {
+  string container_id  = 1;
+  string service_name  = 2;
+  string state         = 3; // running | exited | restarting | ...
+  string status        = 4; // "Up 3 hours"
+  int32  restart_count = 5;
+  int64  started_at_ms = 6;
+}
+
+message LogChunk {
+  string stream_id = 1;
+  bytes  data      = 2; // raw Docker log bytes (may include stream type prefix)
+}
+
+message StatsChunk {
+  string                   stream_id  = 1;
+  repeated ContainerStats  containers = 2;
+}
+
+message ContainerStats {
+  string container_id = 1;
+  string service_name = 2;
+  double cpu_percent  = 3;
+  int64  memory_usage = 4;
+  int64  memory_limit = 5;
+  int64  net_rx_bytes = 6;
+  int64  net_tx_bytes = 7;
+  int64  block_read   = 8;
+  int64  block_write  = 9;
+}
+
+message CommandResult {
+  bool   success = 1;
+  string output  = 2;
+  string error   = 3;
+}
+
+message DockerEvent {
+  string              type         = 1; // container | image | network | volume
+  string              action       = 2; // start | stop | die | oom | ...
+  string              actor_id     = 3;
+  map<string, string> attributes   = 4;
+  int64               timestamp_ms = 5;
+}
+
+message Pong {
+  int64 timestamp_ms = 1;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enrollment
+// ─────────────────────────────────────────────────────────────────────────────
+
+message EnrollRequest {
+  string bootstrap_token = 1;
+  string csr_pem         = 2; // PKCS#10 PEM
+  Hello  node_info       = 3;
+}
+
+message EnrollResponse {
+  string agent_id        = 1;
+  string client_cert_pem = 2;
+  string ca_bundle_pem   = 3;
+}
+
+message RenewCertRequest {
+  string csr_pem = 1;
+}
+
+message RenewCertResponse {
+  string client_cert_pem = 1;
+  string ca_bundle_pem   = 2;
+}
