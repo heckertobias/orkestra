@@ -10,7 +10,7 @@
 - [x] Directory structure as per [01-repo-layout.md](01-repo-layout.md)
 - [x] `buf.yaml` + `buf.gen.yaml` (Go + TS codegen plugins)
 - [x] Skeleton `.proto` files (services declared, messages stubbed)
-- [ ] First `buf generate` pass → `internal/shared/gen/` + `web/gen/`
+- [x] First `buf generate` pass → `internal/shared/gen/` + `web/gen/` (gitignored; CI regenerates via `make proto` before every build)
 - [x] PostgreSQL setup: pgx/v5, goose migrations directory
 - [x] First migration: full schema (all tables)
 - [x] `sqlc.yaml` + SQL query files
@@ -19,9 +19,9 @@
 - [x] `cmd/orkestra-agent/main.go` — starts, logs "waiting for enrollment"
 - [x] `go test ./...` passes (no tests yet, but no compilation errors)
 - [x] `.github/workflows/ci.yml` (GitHub Actions, build + test + lint)
-- [ ] `web/` Vite + React + TypeScript scaffold (`npm create vite`)
+- [x] `web/` Vite + React + TypeScript scaffold (`npm create vite`)
 
-**Result:** Both binaries compile and the CI pipeline is green.
+**Result:** ✅ Both binaries compile and the CI pipeline is green.
 
 ---
 

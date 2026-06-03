@@ -104,7 +104,7 @@ orkestra is in early development (Milestone 0 — scaffolding complete). See [do
 
 | Milestone | Description | Status |
 |---|---|---|
-| M0 | Repo scaffolding & tooling | ✅ Done |
+| M0 | Repo scaffolding & tooling | ✅ Complete |
 | M1 | PKI, enrollment, persistent mTLS connection | 🔧 Next |
 | M2 | Container control & minimal Web UI | Planned |
 | M3 | Compose stacks & desired-state reconciliation | Planned |
