@@ -62,33 +62,71 @@ Key log fields used consistently:
 `deploy/docker/compose.yaml`:
 
 ```yaml
+secrets:
+  orkestra_master_key:
+    file: ./secrets/master_key  # hex-encoded 32-byte KEK — chmod 600, NOT in .env
+
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: orkestra
+      POSTGRES_USER: orkestra
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orkestra"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   master:
     image: ghcr.io/heckertobias/orkestra-master:latest
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "8443:8443"   # Agent gRPC (mTLS)
       - "8080:8080"   # Web UI + API
-    volumes:
-      - orkestra-data:/data
-      - ./tls:/tls:ro            # TLS cert for :8080 (optional)
+    secrets:
+      - orkestra_master_key
+    # Uncomment to provide a TLS cert for the UI endpoint:
+    # volumes:
+    #   - ./tls:/tls:ro
     environment:
-      ORKESTRA_MASTER_KEY: "${ORKESTRA_MASTER_KEY}"
-      ORKESTRA_DB_PATH: /data/orkestra.db
+      # KEK is read from the secret mount — never set ORKESTRA_MASTER_KEY here
+      ORKESTRA_MASTER_KEY_FILE: /run/secrets/orkestra_master_key
+      ORKESTRA_DATABASE_URL: "postgres://orkestra:${POSTGRES_PASSWORD}@postgres:5432/orkestra?sslmode=disable"
       ORKESTRA_AGENT_ADDR: "0.0.0.0:8443"
       ORKESTRA_UI_ADDR: "0.0.0.0:8080"
-      ORKESTRA_TLS_CERT: /tls/server.crt   # optional
-      ORKESTRA_TLS_KEY: /tls/server.key    # optional
       ORKESTRA_LOG_LEVEL: info
+      # ORKESTRA_TLS_CERT: /tls/server.crt
+      # ORKESTRA_TLS_KEY:  /tls/server.key
+
 volumes:
-  orkestra-data:
+  postgres-data:
 ```
+
+The KEK lives in `secrets/master_key` — a `chmod 600` file that Docker mounts as tmpfs under
+`/run/secrets/orkestra_master_key`. It never appears in `environment:` or `.env`. The DB password
+(in `.env`) and the KEK (as a secret file) are in **separate trust domains**: a compromised `.env`
+does not reveal the KEK, and a stolen DB dump cannot be decrypted without it.
 
 First run:
 ```bash
-export ORKESTRA_MASTER_KEY=$(openssl rand -hex 32)
-echo "ORKESTRA_MASTER_KEY=$ORKESTRA_MASTER_KEY" >> .env
-# Save this key somewhere safe!
+# DB password — safe in .env (DB credentials only)
+export POSTGRES_PASSWORD=$(openssl rand -hex 24)
+echo "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" >> .env
+
+# KEK — lives in a SEPARATE file, never in .env
+mkdir -p secrets
+openssl rand -hex 32 > secrets/master_key
+chmod 600 secrets/master_key
+# Back this file up to a password manager or HSM — losing it means losing all encrypted data.
+
 docker compose up -d
 # Open the setup URL printed in the logs
 docker compose logs master | grep "setup"
@@ -121,13 +159,25 @@ ReadWritePaths=/var/lib/orkestra
 WantedBy=multi-user.target
 ```
 
-`/etc/orkestra/master/env`:
+`/etc/orkestra/master/env` (DB credentials only — no KEK here):
 ```
-ORKESTRA_MASTER_KEY=<hex-key>
-ORKESTRA_DB_PATH=/var/lib/orkestra/orkestra.db
+ORKESTRA_DATABASE_URL=postgres://orkestra:<password>@localhost:5432/orkestra?sslmode=disable
 ORKESTRA_AGENT_ADDR=0.0.0.0:8443
 ORKESTRA_UI_ADDR=0.0.0.0:8080
+ORKESTRA_MASTER_KEY_FILE=/etc/orkestra/master/master.key
 ```
+
+`/etc/orkestra/master/master.key` (KEK — stored separately, **not** in the env file):
+```bash
+# Create once:
+openssl rand -hex 32 > /etc/orkestra/master/master.key
+chmod 600 /etc/orkestra/master/master.key
+chown root:root /etc/orkestra/master/master.key
+# Back up to a password manager or HSM — separate from the DB backup.
+```
+
+> Optionally, use systemd `LoadCredential=master.key:/etc/orkestra/master/master.key` and
+> set `ORKESTRA_MASTER_KEY_FILE=%d/master.key` for in-memory credential passing.
 
 ---
 
@@ -216,26 +266,30 @@ Pipeline jobs: `build` + `test` + `lint` (push + PR) → `release` (tag `v*` onl
 
 ### What to Back Up
 
-| Item | Location | Frequency |
-|---|---|---|
-| SQLite database | `ORKESTRA_DB_PATH` | Daily (at minimum) |
-| Master key | `ORKESTRA_MASTER_KEY` | On creation, stored in password manager / HSM |
-| TLS certs (if self-managed) | `/etc/orkestra/master/tls/` | On renewal |
+| Item | How | Frequency | Note |
+|---|---|---|---|
+| PostgreSQL database | `pg_dump` (see below) | Daily (at minimum) | — |
+| KEK (master key file) | Copy `secrets/master_key` or `/etc/orkestra/master/master.key` | On creation; keep in password manager / HSM | Must be stored **separately** from the DB backup |
+| TLS certs (if self-managed) | Copy `/etc/orkestra/master/tls/` | On renewal | — |
 
 ### Recovery Procedure
 
-1. Install Master binary on new host.
-2. Restore `orkestra.db` from backup.
-3. Set `ORKESTRA_MASTER_KEY` to the same value as before.
+1. Install Master binary (and a Postgres instance) on new host.
+2. Restore the database from backup: `psql $ORKESTRA_DATABASE_URL < backup.sql`
+3. Restore the KEK file from your separate backup to the same path
+   (e.g. `/etc/orkestra/master/master.key`, `chmod 600`), and set `ORKESTRA_MASTER_KEY_FILE`
+   accordingly.
 4. Start Master — it picks up all servers, stacks, secrets from the restored DB.
 5. Agents reconnect automatically (they have their certs; as long as the CA cert + DB are
    restored, mTLS still works).
 
-### SQLite Backup (Live)
+### Postgres Backup (Live)
 
 ```bash
-# Online backup (safe while Master is running — SQLite WAL mode)
-sqlite3 /var/lib/orkestra/orkestra.db ".backup '/backup/orkestra-$(date +%Y%m%d).db'"
-```
+# Dump while Master is running (Postgres handles concurrent access natively)
+pg_dump "$ORKESTRA_DATABASE_URL" > "backup/orkestra-$(date +%Y%m%d).sql"
 
-The Master sets `PRAGMA journal_mode=WAL` on startup for concurrent read safety.
+# Or compressed:
+pg_dump "$ORKESTRA_DATABASE_URL" -Fc -f "backup/orkestra-$(date +%Y%m%d).dump"
+# Restore: pg_restore -d "$ORKESTRA_DATABASE_URL" backup/orkestra-20240101.dump
+```

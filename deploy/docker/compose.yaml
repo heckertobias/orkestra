@@ -1,17 +1,41 @@
+secrets:
+  orkestra_master_key:
+    file: ./secrets/master_key  # hex-encoded 32-byte KEK, chmod 600, NOT in .env
+
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: orkestra
+      POSTGRES_USER: orkestra
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orkestra"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   master:
     image: ghcr.io/heckertobias/orkestra-master:latest
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "8443:8443"   # Agent gRPC (mTLS)
       - "8080:8080"   # Web UI + API
-    volumes:
-      - orkestra-data:/data
-      # Uncomment to provide a TLS cert for the UI endpoint:
-      # - ./tls:/tls:ro
+    secrets:
+      - orkestra_master_key
+    # Uncomment to provide a TLS cert for the UI endpoint:
+    # volumes:
+    #   - ./tls:/tls:ro
     environment:
-      ORKESTRA_MASTER_KEY: "${ORKESTRA_MASTER_KEY}"
-      ORKESTRA_DB_PATH: /data/orkestra.db
+      # KEK is read from the secret mount — never set ORKESTRA_MASTER_KEY here
+      ORKESTRA_MASTER_KEY_FILE: /run/secrets/orkestra_master_key
+      ORKESTRA_DATABASE_URL: "postgres://orkestra:${POSTGRES_PASSWORD}@postgres:5432/orkestra?sslmode=disable"
       ORKESTRA_AGENT_ADDR: "0.0.0.0:8443"
       ORKESTRA_UI_ADDR: "0.0.0.0:8080"
       ORKESTRA_LOG_LEVEL: info
@@ -26,4 +50,4 @@ services:
     #   start_period: 10s
 
 volumes:
-  orkestra-data:
+  postgres-data:

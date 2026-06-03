@@ -7,7 +7,7 @@ Lightweight orchestrator for Docker/Compose hosts — a simpler alternative to K
 Plain "SSH + docker compose" is not centrally controllable, not self-healing, and not auditable. Kubernetes and Nomad are too heavy for standalone Docker hosts. orkestra fills this gap.
 
 - A lightweight **Agent** (single Go binary, no runtime) runs on every Linux server and manages containers via the Docker Engine API.
-- A central **Master** holds Desired State in SQLite, distributes it to Agents, and exposes a **Web UI**.
+- A central **Master** holds Desired State in PostgreSQL, distributes it to Agents, and exposes a **Web UI**.
 - Agents connect **outbound** to the Master — NAT and firewall friendly, authenticated via **mTLS**.
 
 ## Architecture
@@ -20,7 +20,7 @@ Plain "SSH + docker compose" is not centrally controllable, not self-healing, an
                      │  │ (Connect)  │◀─▶│   Scheduler      │   │
                      │  └────────────┘   └──────────────────┘   │
                      │  ┌────────────┐   ┌──────────────────┐   │
-                     │  │ Agent-gRPC │   │  Store (SQLite)  │   │
+                     │  │ Agent-gRPC │   │ Store (Postgres) │   │
                      │  │  Endpoint  │   │  + CA / PKI      │   │
                      │  └─────┬──────┘   └──────────────────┘   │
                      └────────┼─────────────────────────────────┘
@@ -36,7 +36,7 @@ Plain "SSH + docker compose" is not centrally controllable, not self-healing, an
 
 ## Core Principles
 
-- **Single source of truth** — Master holds Desired State in SQLite; Agents are stateless with respect to configuration.
+- **Single source of truth** — Master holds Desired State in PostgreSQL; Agents are stateless with respect to configuration.
 - **Connect-out** — Agents initiate the connection; the Master never dials out. NAT/firewall friendly.
 - **Reconciliation over imperative** — Agents continuously converge toward desired state and report drift back.
 
@@ -47,7 +47,7 @@ Plain "SSH + docker compose" is not centrally controllable, not self-healing, an
 | Language | Go ≥ 1.24 |
 | RPC / API | ConnectRPC (gRPC + browser-native, one schema) |
 | Docker control | Docker Engine SDK + compose-go |
-| Persistence | SQLite (CGo-free) + sqlc + goose migrations |
+| Persistence | PostgreSQL + sqlc (pgx/v5) + goose migrations |
 | Auth | argon2id (local) + OIDC (optional) |
 | Secrets | Built-in (age/NaCl) or OpenBao (Vault-compatible) |
 | Frontend | React + TypeScript + Vite + Tailwind + TanStack Query |
@@ -60,9 +60,15 @@ The React SPA is embedded into the Master binary via `go:embed` — one artifact
 ### Master (Docker Compose)
 
 ```bash
-export ORKESTRA_MASTER_KEY=$(openssl rand -hex 32)
-echo "ORKESTRA_MASTER_KEY=$ORKESTRA_MASTER_KEY" >> .env
-# Store the key somewhere safe — it encrypts all secrets at rest.
+# DB password only — safe in .env
+export POSTGRES_PASSWORD=$(openssl rand -hex 24)
+echo "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" >> .env
+
+# KEK lives in a separate file — never in .env
+mkdir -p deploy/docker/secrets
+openssl rand -hex 32 > deploy/docker/secrets/master_key
+chmod 600 deploy/docker/secrets/master_key
+# Back this file up separately — it encrypts the CA key and all secrets at rest.
 
 docker compose -f deploy/docker/compose.yaml up -d
 docker compose -f deploy/docker/compose.yaml logs master | grep "setup"
@@ -112,7 +118,7 @@ orkestra is in early development (Milestone 0 — scaffolding complete). See [do
 - [docs/00-overview.md](docs/00-overview.md) — Architecture overview
 - [docs/01-repo-layout.md](docs/01-repo-layout.md) — Repository structure & build tooling
 - [docs/02-protocol.md](docs/02-protocol.md) — gRPC/Connect protocol
-- [docs/03-data-model.md](docs/03-data-model.md) — SQLite schema
+- [docs/03-data-model.md](docs/03-data-model.md) — PostgreSQL schema
 - [docs/04-reconciliation.md](docs/04-reconciliation.md) — Desired-State model & Converge Engine
 - [docs/05-secrets.md](docs/05-secrets.md) — SecretProvider, built-in, OpenBao
 - [docs/06-security-auth.md](docs/06-security-auth.md) — PKI/mTLS, user auth, RBAC, audit

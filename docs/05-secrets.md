@@ -74,7 +74,9 @@ and injected via dependency injection into every component that needs it.
 
 ### Encryption
 
-- Key material: `ORKESTRA_MASTER_KEY` (hex-encoded 256-bit key from env or file).
+- Key material: 32-byte KEK loaded via `KeySource` at startup (see `internal/master/keys/` and
+  `docs/06-security-auth.md` § "KEK & KeySource"). Recommended: `ORKESTRA_MASTER_KEY_FILE`
+  pointing to a Docker/K8s secret mount or a root-only file.
 - Algorithm: **NaCl secretbox** (`golang.org/x/crypto/nacl/secretbox` — XSalsa20-Poly1305).
 - Each value is encrypted as: `nonce (24 bytes) || ciphertext`, stored in `secrets.ciphertext`.
 - The KEK is never stored in the database. Losing it makes all builtin secrets unrecoverable.
@@ -233,8 +235,10 @@ The `secret_refs` column in `stack_versions` is a JSON array:
 ### Backing Up builtin Secrets
 
 Back up both:
-- The SQLite database file (`orkestra.db`).
-- The `ORKESTRA_MASTER_KEY` value (keep separately — e.g. in a password manager or HSM).
+- The PostgreSQL database (use `pg_dump`).
+- The KEK (the file referenced by `ORKESTRA_MASTER_KEY_FILE`, or `ORKESTRA_MASTER_KEY` in dev).
+  Store it **separately** from the DB backup — e.g. in a password manager or HSM.
+  The two must never be co-located or the encryption provides no protection.
 
 Without the KEK, the ciphertexts in the DB are unrecoverable.
 

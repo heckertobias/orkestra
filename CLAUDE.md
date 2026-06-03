@@ -42,11 +42,11 @@ or in CI. After changing the relevant source you MUST regenerate:
 
 ## Database migrations
 
-SQLite (CGo-free `modernc.org/sqlite`, WAL mode), versioned with `goose`. Migrations live in
+PostgreSQL, accessed via `pgx/v5`, versioned with `goose`. Migrations live in
 `internal/master/store/migrations/`.
 
 ```bash
-make migrate          # apply pending migrations (MIGRATE_DSN env or orkestra-dev.db)
+make migrate          # apply pending migrations (MIGRATE_DSN env or default local Postgres DSN)
 make migrate-down     # roll back the last migration
 make migrate-status
 ```
@@ -61,7 +61,7 @@ plus `secrets`/`secret_bindings`, `audit_log`, and `events`.
 
 Two binaries, one shared protobuf schema (`cmd/orkestra-master`, `cmd/orkestra-agent`):
 
-- **Master** holds the single source of truth (Desired State) in SQLite, runs an internal CA/PKI,
+- **Master** holds the single source of truth (Desired State) in PostgreSQL, runs an internal CA/PKI,
   and serves the Web UI. It never dials out to Agents.
 - **Agent** runs on each server, controls Docker via the Engine SDK + `compose-go`, and
   reconciles actual container state toward the Master's desired state.
@@ -92,10 +92,14 @@ server.
 ## Conventions & gotchas
 
 - **Module path is `github.com/heckertobias/orkestra`** and **runtime env vars use the `ORKESTRA_` prefix**
-  (e.g. `ORKESTRA_UI_ADDR`, `ORKESTRA_AGENT_ADDR`, `ORKESTRA_AGENT_DATA`, `ORKESTRA_MASTER_KEY`).
+  (e.g. `ORKESTRA_UI_ADDR`, `ORKESTRA_AGENT_ADDR`, `ORKESTRA_AGENT_DATA`, `ORKESTRA_DATABASE_URL`,
+  `ORKESTRA_MASTER_KEY_FILE`, `ORKESTRA_KEY_SOURCE`).
 - The agent binary is subcommand-based: `orkestra-agent serve|enroll`. The master takes flags only.
 - Default ports: `8443` Agent gRPC (mTLS, HTTP/2), `8080` UI/API, `9090` Prometheus metrics.
 - Structured logging via stdlib `log/slog`; version info is injected at build time via `-ldflags`
   into `internal/shared/version`.
-- Secrets at rest are encrypted with a KEK derived from `ORKESTRA_MASTER_KEY`; the CA private key
-  and secret ciphertext are never stored in plaintext.
+- The KEK (for CA key + secret encryption at rest) is loaded via a pluggable `KeySource`
+  (`internal/master/keys/`). Default: `ORKESTRA_MASTER_KEY_FILE` → file/secret-mount. For dev
+  only: `ORKESTRA_MASTER_KEY` env var (logs a startup warning). The KEK **must** live in a
+  different trust domain from the DB credentials — never in the same `.env` or Compose
+  `environment:` block. See `docs/06-security-auth.md` § "KEK & KeySource".

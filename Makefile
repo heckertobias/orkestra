@@ -44,16 +44,16 @@ vet: ## Run go vet
 
 # ─── Database ─────────────────────────────────────────────────────────────────
 
-MIGRATE_DSN ?= orkestra-dev.db
+MIGRATE_DSN ?= postgres://orkestra:orkestra@localhost:5432/orkestra?sslmode=disable
 
-migrate: ## Apply pending migrations (uses MIGRATE_DSN env var or orkestra-dev.db)
-	goose -dir internal/master/store/migrations sqlite3 "$(MIGRATE_DSN)" up
+migrate: ## Apply pending migrations (uses MIGRATE_DSN env var or default local Postgres DSN)
+	goose -dir internal/master/store/migrations postgres "$(MIGRATE_DSN)" up
 
 migrate-down: ## Roll back last migration
-	goose -dir internal/master/store/migrations sqlite3 "$(MIGRATE_DSN)" down
+	goose -dir internal/master/store/migrations postgres "$(MIGRATE_DSN)" down
 
 migrate-status: ## Show migration status
-	goose -dir internal/master/store/migrations sqlite3 "$(MIGRATE_DSN)" status
+	goose -dir internal/master/store/migrations postgres "$(MIGRATE_DSN)" status
 
 # ─── Development ──────────────────────────────────────────────────────────────
 

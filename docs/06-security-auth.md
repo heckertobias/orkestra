@@ -11,6 +11,7 @@
 | Privilege escalation in UI | RBAC with scoped roles, enforced at Connect middleware layer |
 | Secret exfiltration | Secrets never stored plaintext; never appear in API responses |
 | Audit bypass | All mutations go through audited service methods (not raw DB access) |
+| DB / backup theft | CA private key and secret values are KEK-encrypted; KEK is held in a **separate trust domain** (file/secret-mount, never in the same config as DB credentials) |
 
 ---
 
@@ -20,7 +21,8 @@
 
 On first start, the Master generates a **self-signed CA** (ECDSA P-384):
 - CA cert is stored in `ca.cert_pem`.
-- CA private key is encrypted with the KEK (`ORKESTRA_MASTER_KEY`) and stored in `ca.key_enc`.
+- CA private key is encrypted with the KEK (loaded via `KeySource`, see below) and stored in
+  `ca.key_enc`. The raw key is never written to disk or the DB.
 - The CA cert is distributed to Agents as part of the `EnrollResponse.ca_bundle_pem`.
   Agents pin this cert for all subsequent TLS connections.
 
@@ -197,13 +199,55 @@ repository). Operators with DBA access can query it directly; the UI provides a 
 
 ---
 
-## 6. Security Checklist for Deployment
+## 6. KEK & KeySource
 
-- [ ] `ORKESTRA_MASTER_KEY` is a random 256-bit value, stored outside the DB (password manager / HSM).
-- [ ] SQLite file and `/etc/orkestra/` directories are readable only by the `orkestra` system user.
+### Why the KEK Must Be in a Separate Trust Domain
+
+The KEK (Key-Encrypting Key) protects three things *at rest* in the database: the CA private key,
+builtin secret ciphertexts, and the OIDC client secret. Its purpose is to make a DB dump or backup
+useless on its own — an attacker with only the database still cannot read the encrypted material.
+
+**This protection is void if the KEK lives alongside the DB credentials** (e.g. same `.env` file
+or Compose `environment:` block). Whoever has the config has both. The KEK only provides real
+defense when held in a **separate trust domain**.
+
+### KeySource Abstraction (`internal/master/keys/`)
+
+The Master resolves the KEK at startup via a pluggable `KeySource` interface:
+
+```go
+type KeySource interface {
+    Load(ctx context.Context) ([]byte, error)  // returns the 32-byte KEK
+}
+```
+
+Auto-selection priority: `ORKESTRA_MASTER_KEY_FILE` set → **file** source; else
+`ORKESTRA_MASTER_KEY` set → **env** source (with a startup warning); else startup error.
+
+| Source | Env var / config | Notes |
+|---|---|---|
+| **file** *(recommended)* | `ORKESTRA_MASTER_KEY_FILE=/run/secrets/orkestra_master_key` | Docker/K8s `secrets:` mount (tmpfs) or a root-only `chmod 600` file. Value never appears in config. Allows unattended restart. |
+| **env** *(dev/test only)* | `ORKESTRA_MASTER_KEY=<hex>` | Logs a warning on startup. Acceptable for local dev; not recommended in production. |
+| **interactive** *(planned)* | — | Master starts "sealed"; operator enters key at runtime via TTY prompt or an unseal endpoint. Nothing persisted. Breaks auto-restart. |
+| **kms** *(planned)* | `ORKESTRA_KEY_SOURCE=kms` | KEK is wrapped by an external KMS (OpenBao Transit or Cloud KMS); unwrapped at boot via API. No plaintext at rest, unattended restart works. |
+
+### Deployment Rule
+
+The KEK must **never** appear in the same file or secret store as the database credentials. Store
+it as a Docker/K8s `secret:` (mounted as tmpfs), a systemd `LoadCredential`, or a dedicated
+`chmod 600` file owned by `root` — completely separate from `.env` and Compose `environment:`.
+
+---
+
+## 7. Security Checklist for Deployment
+
+- [ ] KEK is provided via `ORKESTRA_MASTER_KEY_FILE` pointing to a Docker/K8s secret mount or a
+      `chmod 600` file — **never** as a plain env var in the same config as DB credentials.
+- [ ] KEK is a random 256-bit value, backed up separately from the database (password manager / HSM).
+- [ ] PostgreSQL access is restricted to the `orkestra` DB user; TLS is enforced on the connection.
 - [ ] Port `:8443` is firewalled to Agent IPs only (or the Master is on a private network).
 - [ ] Port `:9090` is bound to loopback or protected by a scrape-IP allowlist.
 - [ ] TLS cert on `:8080` is valid (Let's Encrypt or internal PKI).
 - [ ] Bootstrap tokens are single-use and have short TTLs (< 1 hour).
 - [ ] Agent hosts' `/var/run/docker.sock` is accessible only to the `orkestra-agent` user.
-- [ ] Regular backups of `orkestra.db` + `ORKESTRA_MASTER_KEY` to separate secure storage.
+- [ ] Regular backups of the PostgreSQL database (`pg_dump`) and the KEK stored **separately**.

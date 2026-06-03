@@ -19,7 +19,8 @@ orkestra/
 │   │   ├── agentgw/             # Agent Gateway: gRPC server, stream mux, session registry
 │   │   ├── api/                 # Connect handlers for the UI API
 │   │   ├── reconciler/          # Desired-State diff → commands to Agents
-│   │   ├── store/               # SQLite (sqlc-generated) + repositories
+│   │   ├── store/               # PostgreSQL (sqlc-generated, pgx/v5) + repositories
+│   │   ├── keys/                # KeySource abstraction — loads KEK at startup (file/env/kms)
 │   │   ├── pki/                 # Internal CA, cert issuance, bootstrap tokens
 │   │   ├── auth/                # Sessions, local users, OIDC, RBAC middleware
 │   │   ├── secrets/             # SecretProvider interface + builtin + openbao
@@ -65,8 +66,8 @@ The Agent Gateway is the heart of the Master. It:
 
 ### `internal/master/reconciler`
 
-Watches the SQLite `assignments` table (via polling or WAL hook). When a stack version or
-assignment changes, it computes the new Desired State for all affected servers and pushes
+Watches the `assignments` table (via polling or Postgres `LISTEN/NOTIFY`). When a stack version
+or assignment changes, it computes the new Desired State for all affected servers and pushes
 `ApplyDesiredState` messages via the Agent Gateway.
 
 ### `internal/agent/compose`
@@ -106,7 +107,7 @@ goreleaser           (release builds)
 | `make lint` | `golangci-lint run` + `buf lint` |
 | `make dev-master` | Runs Master with hot-reload (via `air`) |
 | `make dev-agent` | Runs Agent pointed at local Master |
-| `make migrate` | Runs pending DB migrations against the dev SQLite file |
+| `make migrate` | Runs pending DB migrations against the Postgres DSN (`MIGRATE_DSN`) |
 | `make release` | `goreleaser release --clean` |
 
 ### protobuf / buf

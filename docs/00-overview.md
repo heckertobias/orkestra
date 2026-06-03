@@ -24,7 +24,7 @@ orkestra fills this gap with a **Master-Agent architecture**:
                          │  │ (Connect)  │◀─▶│   Scheduler       │    │
                          │  └────────────┘   └──────────────────┘    │
                          │  ┌────────────┐   ┌──────────────────┐    │
-                         │  │ Agent-gRPC │   │  Store (SQLite)   │    │
+                         │  │ Agent-gRPC │   │  Store (Postgres) │    │
                          │  │  Endpoint  │   │  + CA / PKI       │    │
                          │  └─────┬──────┘   └──────────────────┘    │
                          │        │          ┌──────────────────┐    │
@@ -50,8 +50,8 @@ orkestra fills this gap with a **Master-Agent architecture**:
 
 ## Core Principles
 
-- **Single source of truth:** The Master holds Desired State in SQLite. Agents are stateless with
-  respect to configuration — they always derive their target state from the Master.
+- **Single source of truth:** The Master holds Desired State in PostgreSQL. Agents are stateless
+  with respect to configuration — they always derive their target state from the Master.
 - **Connect-out:** Agents initiate the connection; the Master never dials out to an Agent. Commands
   are pushed over the established bidirectional stream.
 - **Reconciliation over Imperative:** The Master sets a desired state; Agents converge toward it
@@ -67,7 +67,7 @@ orkestra fills this gap with a **Master-Agent architecture**:
 | RPC / API | **ConnectRPC** (`connectrpc.com/connect`) | One protobuf schema serves Agents (gRPC/HTTP2, bidi-stream) **and** browsers (Connect/JSON + server-streaming). No separate gRPC-web proxy needed |
 | Docker control | `github.com/docker/docker/client` (Engine API) | Direct control without CLI subprocess |
 | Compose | `github.com/compose-spec/compose-go/v2` | Official Compose parser → `types.Project` |
-| Persistence | **SQLite** (`modernc.org/sqlite`, CGo-free) + **sqlc** for type-safe SQL | Embedded, no external DB, single binary stays intact |
+| Persistence | **PostgreSQL** + **sqlc** (pgx/v5) for type-safe SQL | External DB; robust concurrency, JSONB indexes, `LISTEN/NOTIFY` for reconciler |
 | Migrations | `pressly/goose` | Versioned schema migrations |
 | Auth (users) | local: `argon2id`; OIDC: `coreos/go-oidc` + `golang.org/x/oauth2` | Local as default, OIDC optional |
 | Secrets | own `SecretProvider` interface; builtin via `filippo.io/age`; OpenBao via `openbao/openbao/api` (Vault API-compatible) | Pluggable, both backends from day 1 |
@@ -86,7 +86,7 @@ one artifact that serves both the API and the UI.
 
 - [01-repo-layout.md](01-repo-layout.md) — Repository structure & build tooling
 - [02-protocol.md](02-protocol.md) — gRPC/Connect protocol, protobuf definitions
-- [03-data-model.md](03-data-model.md) — SQLite schema
+- [03-data-model.md](03-data-model.md) — PostgreSQL schema
 - [04-reconciliation.md](04-reconciliation.md) — Desired-State model & Converge Engine
 - [05-secrets.md](05-secrets.md) — SecretProvider, builtin, OpenBao, distribution
 - [06-security-auth.md](06-security-auth.md) — PKI/mTLS, User Auth, RBAC, Audit

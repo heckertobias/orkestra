@@ -11,7 +11,7 @@
 - [x] `buf.yaml` + `buf.gen.yaml` (Go + TS codegen plugins)
 - [x] Skeleton `.proto` files (services declared, messages stubbed)
 - [ ] First `buf generate` pass → `internal/shared/gen/` + `web/gen/`
-- [x] SQLite setup: `modernc.org/sqlite`, WAL pragma, goose migrations directory
+- [x] PostgreSQL setup: pgx/v5, goose migrations directory
 - [x] First migration: full schema (all tables)
 - [x] `sqlc.yaml` + SQL query files
 - [x] `Makefile` with `proto`, `sqlc`, `build`, `test`, `lint`, `web`, `migrate` targets
@@ -29,7 +29,8 @@
 
 **Goal:** An Agent can enroll and maintain a persistent authenticated connection to the Master.
 
-- [ ] `internal/master/pki/`: CA generation on first start, KEK-encrypted storage, CSR signing
+- [ ] `internal/master/keys/`: `KeySource` interface + `file` (default) and `env` (dev/warn) implementations
+- [ ] `internal/master/pki/`: CA generation on first start, KEK-encrypted storage (via `KeySource`), CSR signing
 - [ ] `internal/master/store/`: full schema migration, sqlc queries for servers + enrollment_tokens + certificates
 - [ ] `AgentService.Enroll` RPC handler (token validation, CSR signing, server record creation)
 - [ ] `AgentService.Connect` RPC handler (mTLS verification, session registry registration)
@@ -67,7 +68,7 @@
 
 **Goal:** Deploy, update, and roll back Compose stacks declaratively with self-healing.
 
-- [ ] Full SQLite schema migration: `stacks`, `stack_versions`, `assignments`, `agent_state`
+- [ ] Full schema migration: `stacks`, `stack_versions`, `assignments`, `agent_state`
 - [ ] `StackService` CRUD: CreateStack, UpdateStack (→ new version), ListStackVersions, AssignStack, UnassignStack, RollbackStack
 - [ ] `internal/agent/compose/`: compose-go Loader, Converge Engine (MVP field matrix — see [04-reconciliation.md](04-reconciliation.md))
   - [ ] derive_desired_containers from `types.Project`
@@ -93,7 +94,7 @@
 **Goal:** Secrets managed centrally, distributed securely, never persisted in plaintext.
 
 - [ ] Full secrets schema migration: `secrets`, `secret_bindings`
-- [ ] `internal/master/secrets/`: `SecretProvider` interface, `builtin` provider (age/NaCl + SQLite), `openbao` provider (KVv2 API + AppRole auth)
+- [ ] `internal/master/secrets/`: `SecretProvider` interface, `builtin` provider (age/NaCl + Postgres), `openbao` provider (KVv2 API + AppRole auth)
 - [ ] `SecretService` CRUD: CreateSecret, UpdateSecret, DeleteSecret, ListSecrets, MigrateProvider
 - [ ] Secret resolution in `ApplyDesiredState` (Master resolves → sends over mTLS)
 - [ ] `internal/agent/secrets/`: materialization (ENV, FILE/tmpfs, DOCKER_SECRET with Swarm fallback)
@@ -155,7 +156,7 @@
 - [ ] `deploy/systemd/` final unit files (hardened: NoNewPrivileges, ProtectSystem, etc.)
 - [ ] `deploy/docker/compose.yaml` with healthcheck, restart policy, volume config
 - [ ] Security checklist review (see [06-security-auth.md](06-security-auth.md))
-- [ ] SQLite WAL + online backup documentation
+- [ ] PostgreSQL `pg_dump` backup documentation
 - [ ] Full documentation review + CHANGELOG
 - [ ] v0.1.0 release tag
 
@@ -168,7 +169,7 @@
 | Test Type | Scope | Tools |
 |---|---|---|
 | Unit | Store queries, RBAC logic, spec-hash computation, secret encryption | `go test` |
-| Integration (DB) | SQLite migrations, sqlc queries against real SQLite | `go test` + temp file |
+| Integration (DB) | Postgres migrations, sqlc queries against real Postgres | `go test` + testcontainers-go (or `services: postgres` in CI) |
 | Integration (Docker) | Converge Engine end-to-end | `go test` + Docker daemon (dind in CI) |
 | Integration (gRPC) | Enrollment + Connect stream (in-process with TLS) | `go test` + `net/http/httptest` |
 | E2E (manual) | Full flow per Verification section | Manual / future: Playwright |
