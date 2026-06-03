@@ -55,6 +55,8 @@
 - [ ] Master bridges `StreamLogs` + `StreamStats` requests: browser → Master → Agent → Master → browser
 - [ ] `AgentService.Connect`: handle `ExecCommand` (start/stop/restart/pull/rm) dispatch, return `CommandResult`
 - [ ] `StackService.ListServers`, `StackService.GetServer` — query from DB + merge with agentgw session state
+- [ ] **Web UI — Vite + React + TypeScript scaffold** (`npm create vite`), Tailwind v4, shadcn/ui dark theme with custom colour tokens (see `docs/07-web-ui.md` — Branding section)
+- [ ] **Logo & brand assets:** SVG logo variants (full illustration, head icon, wordmark) in `web/src/assets/`; favicon + app icon derived from head icon
 - [ ] **Web UI — Server List page:** server cards with online/offline status
 - [ ] **Web UI — Server Detail page:** container table, start/stop/restart/pull/remove actions
 - [ ] **Web UI — Live Logs drawer:** streaming log output with follow toggle
