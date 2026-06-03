@@ -1,5 +1,61 @@
 # orkestra — Web UI
 
+## Branding & Visual Design
+
+### Mascot & Logo
+
+Concept: an **orc conductor** in a tuxedo wielding a baton, with Docker-whale containers as
+the orchestra. This plays on the name "orkestra" — the orc conducts, the containers play.
+
+- **Tagline:** *"You conduct. We orchestrate."*
+- **Logo variants needed:** full illustration (marketing/landing), simplified head icon (app icon,
+  favicon), wordmark-only (`ork`**`estra`** with accent colour on `estra`).
+- Logo asset directory: `web/src/assets/` (SVG preferred for scalability).
+
+### Colour Palette
+
+| Token | Value | Usage |
+|---|---|---|
+| Background | `#0d1117` (near-black) | App background, sidebar |
+| Surface | `#161b22` | Cards, panels |
+| Border | `#21262d` | Dividers, table borders |
+| Accent / Brand | `#7ee22a` (lime green) | Active nav item, badges, CTA buttons, progress bars |
+| Text primary | `#e6edf3` | Headings, primary content |
+| Text muted | `#8b949e` | Labels, secondary info |
+| Online green | `#3fb950` | Server/container online status dot |
+| Error red | `#f85149` | Errors, drift alerts |
+
+### Layout
+
+Sidebar-based navigation (dark, fixed left) with a main content area — matching the reference:
+
+```
+┌──────────┬─────────────────────────────────────────┐
+│          │  Page Header          [ search / user ]  │
+│  sidebar │─────────────────────────────────────────┤
+│          │                                           │
+│  ● item  │   Main content area                      │
+│  ○ item  │   (table / detail / editor)              │
+│  ○ item  │                                          │
+│          │─────────────────────────────────────────┤
+│          │  [ stats / system overview panel ]       │
+└──────────┴─────────────────────────────────────────┘
+```
+
+Key UI details from the reference:
+- Status dots (● Online, ○ Offline) in the server/endpoint table
+- `+ Add endpoint` / `+ New Stack` primary action buttons (top-right of content area)
+- System Overview panel (right rail on dashboard): CPU %, Memory %, Storage, Container count
+  — rendered as labelled progress bars
+- Sidebar items: Dashboard, Servers, Stacks, Containers, Secrets, Users, Settings
+
+### Tailwind Configuration
+
+Define the palette as Tailwind CSS custom tokens in `web/tailwind.config.ts` so components stay
+consistent. Use `shadcn/ui` with a custom dark theme derived from these values.
+
+---
+
 ## Tech Stack
 
 | Component | Choice |
