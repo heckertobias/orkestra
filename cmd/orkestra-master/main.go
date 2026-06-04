@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/heckertobias/orkestra/internal/master/agentgw"
 	masterapi "github.com/heckertobias/orkestra/internal/master/api"
+	masterauth "github.com/heckertobias/orkestra/internal/master/auth"
 	"github.com/heckertobias/orkestra/internal/master/keys"
 	"github.com/heckertobias/orkestra/internal/master/pki"
 	masterreconciler "github.com/heckertobias/orkestra/internal/master/reconciler"
@@ -25,6 +27,11 @@ import (
 	"github.com/heckertobias/orkestra/internal/shared/version"
 	"github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1/orkestrav1connect"
 )
+
+// publicProcedures lists Connect RPC procedures that do not require a session.
+var publicProcedures = map[string]bool{
+	orkestrav1connect.AuthServiceLoginProcedure: true,
+}
 
 func main() {
 	var (
@@ -78,20 +85,36 @@ func main() {
 	}
 	slog.Info("CA ready")
 
+	// --- First-run setup ---
+	q := store.New(db)
+	var setupToken string
+	count, err := q.CountUsers(ctx)
+	if err != nil {
+		slog.Error("count users", "err", err)
+		os.Exit(1)
+	}
+	if count == 0 {
+		tok, err := masterauth.GenerateSetupToken()
+		if err != nil {
+			slog.Error("generate setup token", "err", err)
+			os.Exit(1)
+		}
+		setupToken = tok
+		uiURL := fmt.Sprintf("http://%s", *uiAddr)
+		slog.Warn("FIRST RUN: no users configured — open setup URL to create the admin account",
+			"url", fmt.Sprintf("%s/login?setup=%s", uiURL, setupToken))
+	}
+
 	// --- Agent Gateway ---
 	registry := agentgw.NewRegistry()
 	gwHandler := agentgw.NewHandler(db, ca, registry)
 
-	// Agent gRPC server (mTLS, HTTP/2).
 	agentMux := http.NewServeMux()
 	agentPath, agentSvcHandler := orkestrav1connect.NewAgentServiceHandler(gwHandler,
 		connect.WithCompressMinBytes(1024),
 	)
 	agentMux.Handle(agentPath, agentgw.MTLSMiddleware(agentSvcHandler))
 
-	// For the agent listener we use the CA cert as the server cert for simplicity —
-	// in production operators would supply a real TLS cert via ORKESTRA_TLS_CERT/KEY.
-	// The CA also verifies client certificates (mTLS).
 	caCert := ca.TLSCert()
 	agentTLSCfg := agentgw.NewAgentTLSConfig(caCert, ca.CertPool())
 
@@ -114,7 +137,7 @@ func main() {
 		}
 	}()
 
-	// Offline detection: mark servers offline after 3 missed heartbeats (~90s).
+	// Offline detection.
 	go registry.RunHeartbeatMonitor(ctx, 30*time.Second, func(agentID string) {
 		_, err := db.Exec(context.Background(),
 			`UPDATE servers SET status = 'offline' WHERE id = $1 AND status = 'online'`, agentID)
@@ -125,19 +148,39 @@ func main() {
 		}
 	})
 
-	// --- Master Reconciler (polls assignments → pushes ApplyDesiredState) ---
+	// --- Master Reconciler ---
 	rec := masterreconciler.New(db, registry, 15*time.Second)
 	go rec.Run(ctx)
 
-	// --- UI API (StackService) ---
-	stackHandler := masterapi.NewStackServiceHandler(db, registry, func() { rec.PushNow(ctx) })
-	stackPath, stackSvcHandler := orkestrav1connect.NewStackServiceHandler(stackHandler,
+	// --- Connect interceptors ---
+	authInterceptor := masterauth.NewAuthInterceptor(publicProcedures)
+	connectOpts := []connect.HandlerOption{
 		connect.WithCompressMinBytes(1024),
-	)
+		connect.WithInterceptors(authInterceptor),
+	}
 
-	// --- UI / API server (plain HTTP/2 with h2c for dev, TLS in prod) ---
+	// --- StackService ---
+	stackHandler := masterapi.NewStackServiceHandler(db, registry, func() { rec.PushNow(ctx) })
+	stackPath, stackSvcHandler := orkestrav1connect.NewStackServiceHandler(stackHandler, connectOpts...)
+
+	// --- SecretService ---
+	secretHandler := masterapi.NewSecretServiceHandler(db, kek)
+	secretPath, secretSvcHandler := orkestrav1connect.NewSecretServiceHandler(secretHandler, connectOpts...)
+
+	// --- AuthService ---
+	authHandler := masterapi.NewAuthServiceHandler(db, &setupToken)
+	authPath, authSvcHandler := orkestrav1connect.NewAuthServiceHandler(authHandler, connectOpts...)
+
+	// --- Session middleware ---
+	sessionMW := masterauth.SessionMiddleware(q)
+
+	// --- UI / API server ---
 	uiMux := http.NewServeMux()
 	uiMux.Handle(stackPath, stackSvcHandler)
+	uiMux.Handle(secretPath, secretSvcHandler)
+	uiMux.Handle(authPath, authSvcHandler)
+	uiMux.HandleFunc("/api/setup", authHandler.SetupHTTPHandler)
+	uiMux.HandleFunc("/api/audit", authHandler.AuditLogHTTPHandler)
 	uiMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -154,7 +197,7 @@ func main() {
 
 	uiServer := &http.Server{
 		Addr:        *uiAddr,
-		Handler:     h2c.NewHandler(uiMux, &http2.Server{}),
+		Handler:     h2c.NewHandler(sessionMW(uiMux), &http2.Server{}),
 		BaseContext: func(_ net.Listener) context.Context { return ctx },
 	}
 

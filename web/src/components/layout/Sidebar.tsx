@@ -1,6 +1,7 @@
-import { NavLink } from 'react-router-dom'
-import { Server, Layers, KeyRound, Users, LayoutDashboard, Settings } from 'lucide-react'
+import { NavLink, useNavigate } from 'react-router-dom'
+import { Server, Layers, KeyRound, Users, LayoutDashboard, Settings, ClipboardList, LogOut } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { useAuth } from '@/lib/auth'
 
 const nav = [
   { to: '/',         label: 'Dashboard', icon: LayoutDashboard },
@@ -8,10 +9,19 @@ const nav = [
   { to: '/stacks',   label: 'Stacks',    icon: Layers },
   { to: '/secrets',  label: 'Secrets',   icon: KeyRound },
   { to: '/users',    label: 'Users',     icon: Users },
+  { to: '/audit',    label: 'Audit Log', icon: ClipboardList },
   { to: '/settings', label: 'Settings',  icon: Settings },
 ]
 
 export function Sidebar() {
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
+
+  async function handleLogout() {
+    await logout()
+    navigate('/login', { replace: true })
+  }
+
   return (
     <aside
       className="flex flex-col w-52 shrink-0 h-full border-r"
@@ -49,6 +59,30 @@ export function Sidebar() {
           </NavLink>
         ))}
       </nav>
+
+      {/* User info + logout */}
+      {user && (
+        <div className="px-3 py-3 border-t" style={{ borderColor: 'var(--border)' }}>
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-xs font-medium truncate" style={{ color: 'var(--text)' }}>
+                {user.displayName || user.username}
+              </p>
+              <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>
+                {user.roles.join(', ') || 'no role'}
+              </p>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="p-1.5 rounded hover:bg-[var(--surface-2)] shrink-0"
+              style={{ color: 'var(--text-muted)' }}
+              title="Sign out"
+            >
+              <LogOut size={14} />
+            </button>
+          </div>
+        </div>
+      )}
     </aside>
   )
 }

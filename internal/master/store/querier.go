@@ -9,34 +9,59 @@ import (
 )
 
 type Querier interface {
+	CountSecretBindings(ctx context.Context, secretID string) (int64, error)
+	CountUsers(ctx context.Context) (int64, error)
 	DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) error
+	DeleteRoleBinding(ctx context.Context, id string) error
+	DeleteSecret(ctx context.Context, id string) error
 	GetActiveCertificateForAgent(ctx context.Context, agentID string) (Certificate, error)
 	GetCertificateByFingerprint(ctx context.Context, fingerprint string) (Certificate, error)
 	GetEnrollmentTokenByHash(ctx context.Context, tokenHash string) (EnrollmentToken, error)
 	GetLatestStackVersion(ctx context.Context, stackID string) (StackVersion, error)
 	GetNextVersionNumber(ctx context.Context, stackID string) (int32, error)
+	GetSecret(ctx context.Context, id string) (Secret, error)
 	GetServer(ctx context.Context, id string) (Server, error)
+	GetSession(ctx context.Context, arg GetSessionParams) (Session, error)
 	GetStack(ctx context.Context, id string) (Stack, error)
 	GetStackVersion(ctx context.Context, id string) (StackVersion, error)
+	GetUser(ctx context.Context, id string) (User, error)
+	GetUserByUsername(ctx context.Context, username string) (User, error)
+	GetUserRoles(ctx context.Context, userID string) ([]string, error)
 	IncrementTokenUsage(ctx context.Context, id string) error
+	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
 	InsertCertificate(ctx context.Context, arg InsertCertificateParams) error
 	InsertEnrollmentToken(ctx context.Context, arg InsertEnrollmentTokenParams) (EnrollmentToken, error)
+	InsertRoleBinding(ctx context.Context, arg InsertRoleBindingParams) (RoleBinding, error)
+	InsertSecret(ctx context.Context, arg InsertSecretParams) (Secret, error)
 	InsertServer(ctx context.Context, arg InsertServerParams) (Server, error)
+	InsertSession(ctx context.Context, arg InsertSessionParams) error
 	InsertStack(ctx context.Context, arg InsertStackParams) (Stack, error)
 	InsertStackVersion(ctx context.Context, arg InsertStackVersionParams) (StackVersion, error)
+	InsertUser(ctx context.Context, arg InsertUserParams) (User, error)
+	ListAllRoleBindings(ctx context.Context) ([]RoleBinding, error)
 	ListAssignmentsForServer(ctx context.Context, serverID string) ([]ListAssignmentsForServerRow, error)
 	ListAssignmentsForStack(ctx context.Context, stackID string) ([]Assignment, error)
+	ListAuditLog(ctx context.Context, limit int32) ([]AuditLog, error)
 	ListEnrollmentTokens(ctx context.Context) ([]EnrollmentToken, error)
+	ListRoleBindingsByUser(ctx context.Context, userID string) ([]RoleBinding, error)
+	ListSecrets(ctx context.Context) ([]ListSecretsRow, error)
 	ListServers(ctx context.Context) ([]Server, error)
 	ListStackVersions(ctx context.Context, stackID string) ([]StackVersion, error)
 	ListStacks(ctx context.Context) ([]Stack, error)
+	ListUsers(ctx context.Context) ([]User, error)
 	MarkOfflineServers(ctx context.Context, lastSeenAt *int64) error
 	RevokeCertificate(ctx context.Context, arg RevokeCertificateParams) error
 	RevokeEnrollmentToken(ctx context.Context, id string) error
+	RevokeSession(ctx context.Context, id string) error
+	SetLastLogin(ctx context.Context, arg SetLastLoginParams) error
+	SetPasswordHash(ctx context.Context, arg SetPasswordHashParams) error
 	SoftDeleteServer(ctx context.Context, arg SoftDeleteServerParams) error
 	SoftDeleteStack(ctx context.Context, arg SoftDeleteStackParams) error
+	TouchSession(ctx context.Context, arg TouchSessionParams) error
+	UpdateSecret(ctx context.Context, arg UpdateSecretParams) (Secret, error)
 	UpdateServer(ctx context.Context, arg UpdateServerParams) (Server, error)
 	UpdateServerStatus(ctx context.Context, arg UpdateServerStatusParams) error
+	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpsertAssignment(ctx context.Context, arg UpsertAssignmentParams) (Assignment, error)
 }
 
