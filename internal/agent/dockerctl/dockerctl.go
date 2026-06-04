@@ -31,6 +31,9 @@ func New() (*Client, error) {
 // Close releases the underlying Docker client.
 func (c *Client) Close() error { return c.dc.Close() }
 
+// RawClient returns the underlying *client.Client for use by packages that need it directly.
+func (c *Client) RawClient() *client.Client { return c.dc }
+
 // ContainerInfo is a summary of a single container.
 type ContainerInfo struct {
 	ID          string

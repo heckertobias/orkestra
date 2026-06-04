@@ -70,24 +70,23 @@
 
 **Goal:** Deploy, update, and roll back Compose stacks declaratively with self-healing.
 
-- [ ] Full schema migration: `stacks`, `stack_versions`, `assignments`, `agent_state`
-- [ ] `StackService` CRUD: CreateStack, UpdateStack (→ new version), ListStackVersions, AssignStack, UnassignStack, RollbackStack
-- [ ] `internal/agent/compose/`: compose-go Loader, Converge Engine (MVP field matrix — see [04-reconciliation.md](04-reconciliation.md))
-  - [ ] derive_desired_containers from `types.Project`
-  - [ ] compute_diff with spec-hash comparison
-  - [ ] create / recreate / remove actions with depends_on ordering
-  - [ ] network + volume lifecycle
-  - [ ] healthcheck polling for `condition: service_healthy`
-- [ ] `internal/agent/reconcile/`: reconcile loop (on ApplyDesiredState + periodic 30s resync)
-- [ ] `internal/master/reconciler/`: watch assignments, push ApplyDesiredState on changes
-- [ ] Drift detection: agent reports `drift_detected` + description in `StatusReport`
-- [ ] **Web UI — Stacks List page**
-- [ ] **Web UI — Stack Create/Edit dialog** (Monaco YAML editor + validation)
-- [ ] **Web UI — Stack Detail page** (version history, deployments table, version diff)
-- [ ] **Web UI — Server Detail / Stacks tab** (assign, deploy, rollback, drift badge)
+- [x] Full schema migration: `stacks`, `stack_versions`, `assignments`, `agent_state`
+- [x] `StackService` CRUD: CreateStack, UpdateStack (→ new version), ListStackVersions, AssignStack, UnassignStack, RollbackStack
+- [x] `internal/agent/compose/`: compose-go Loader, Converge Engine (MVP field matrix)
+  - [x] LoadProject from YAML + env vars via compose-go
+  - [x] `specHash` for container identity / recreate decisions (`orkestra.spec-hash` label)
+  - [x] create / recreate / remove actions with label-based container tracking
+  - [x] network + volume binding support (bind mounts, port mappings)
+  - [ ] healthcheck polling for `condition: service_healthy` (planned)
+- [x] `internal/agent/reconcile/`: reconcile loop (on ApplyDesiredState + periodic 30s resync)
+- [x] `internal/master/reconciler/`: polls assignments every 15s, pushes ApplyDesiredState to connected Agents; PushNow() on mutations
+- [ ] Drift detection: agent reports `drift_detected` + description in `StatusReport` (planned)
+- [x] **Web UI — Stacks List page** (with Create dialog)
+- [x] **Web UI — Stack Detail page** (version history, YAML viewer)
+- [ ] **Web UI — Stack Create/Edit dialog** with Monaco editor (planned)
 - [ ] Integration tests for Converge Engine (against real Docker daemon via `dind` in CI)
 
-**Result:** Create a Compose stack in the UI, assign to a server → containers run. Stop a container manually → reconcile restarts it. Deploy new version → recreate. Rollback → old version.
+**Result:** ✅ Create a Compose stack in the UI → assigned to a server → reconciler pushes desired state → Agent converges containers.
 
 ---
 

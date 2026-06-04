@@ -9,8 +9,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/docker/docker/client"
+
 	"github.com/heckertobias/orkestra/internal/agent/conn"
+	"github.com/heckertobias/orkestra/internal/agent/dockerctl"
 	"github.com/heckertobias/orkestra/internal/agent/enroll"
+	agentreconcile "github.com/heckertobias/orkestra/internal/agent/reconcile"
 	orkestraV1 "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1"
 	"github.com/heckertobias/orkestra/internal/shared/version"
 )
@@ -56,12 +60,28 @@ func runServe(args []string) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Set up Docker client and reconciler.
+	dc, err := dockerctl.New()
+	if err != nil {
+		slog.Warn("docker client unavailable (is Docker running?)", "err", err)
+		dc = nil
+	}
+	_ = dc // used via reconciler below
+
+	rec := agentreconcile.New(dcForReconcile(dc))
+
+	go rec.Run(ctx)
+
 	agent := conn.New(cfg, *dataDir, func(ctx context.Context, msg *orkestraV1.MasterMessage) error {
 		switch p := msg.Payload.(type) {
+		case *orkestraV1.MasterMessage_ApplyDesiredState:
+			rec.Apply(p.ApplyDesiredState)
 		case *orkestraV1.MasterMessage_Ping:
 			slog.Debug("ping from master", "ts", p.Ping.TimestampMs)
+		case *orkestraV1.MasterMessage_ExecCommand:
+			slog.Debug("exec command received (M2 dockerctl)")
 		default:
-			slog.Debug("master message received (handler not yet implemented)")
+			slog.Debug("unhandled master message")
 		}
 		return nil
 	})
@@ -114,6 +134,15 @@ func runEnroll(args []string) {
 		"agent_id", cfg.AgentID,
 		"data_dir", *dataDir,
 	)
+}
+
+// dcForReconcile extracts the underlying *client.Client from our dockerctl wrapper.
+// Returns nil if docker is not available (reconciler handles nil gracefully).
+func dcForReconcile(dc *dockerctl.Client) *client.Client {
+	if dc == nil {
+		return nil
+	}
+	return dc.RawClient()
 }
 
 func setupLogger(level string) {

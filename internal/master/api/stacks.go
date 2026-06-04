@@ -16,14 +16,15 @@ import (
 
 // StackServiceHandler implements the UI-facing StackService RPC handlers.
 type StackServiceHandler struct {
-	db       *pgxpool.Pool
-	q        *store.Queries
-	registry *agentgw.Registry
+	db           *pgxpool.Pool
+	q            *store.Queries
+	registry     *agentgw.Registry
+	reconcilerFn func() // called after mutations that affect desired state
 }
 
 // NewStackServiceHandler creates a StackServiceHandler.
-func NewStackServiceHandler(db *pgxpool.Pool, registry *agentgw.Registry) *StackServiceHandler {
-	return &StackServiceHandler{db: db, q: store.New(db), registry: registry}
+func NewStackServiceHandler(db *pgxpool.Pool, registry *agentgw.Registry, reconcilerFn func()) *StackServiceHandler {
+	return &StackServiceHandler{db: db, q: store.New(db), registry: registry, reconcilerFn: reconcilerFn}
 }
 
 // ListServers returns all non-deleted servers merged with live connection state.
@@ -90,43 +91,7 @@ func (h *StackServiceHandler) DeleteServer(ctx context.Context, req *connect.Req
 	return connect.NewResponse(&orkestraV1.Empty{}), nil
 }
 
-// Stub implementations for Stack CRUD and streaming (to be filled in M3/M6).
-
-func (h *StackServiceHandler) ListStacks(ctx context.Context, req *connect.Request[orkestraV1.ListStacksRequest]) (*connect.Response[orkestraV1.ListStacksResponse], error) {
-	return connect.NewResponse(&orkestraV1.ListStacksResponse{}), nil
-}
-
-func (h *StackServiceHandler) GetStack(ctx context.Context, req *connect.Request[orkestraV1.GetStackRequest]) (*connect.Response[orkestraV1.Stack], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("not yet implemented"))
-}
-
-func (h *StackServiceHandler) CreateStack(ctx context.Context, req *connect.Request[orkestraV1.CreateStackRequest]) (*connect.Response[orkestraV1.Stack], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("not yet implemented"))
-}
-
-func (h *StackServiceHandler) UpdateStack(ctx context.Context, req *connect.Request[orkestraV1.UpdateStackRequest]) (*connect.Response[orkestraV1.StackVersion], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("not yet implemented"))
-}
-
-func (h *StackServiceHandler) DeleteStack(ctx context.Context, req *connect.Request[orkestraV1.DeleteStackRequest]) (*connect.Response[orkestraV1.Empty], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("not yet implemented"))
-}
-
-func (h *StackServiceHandler) ListStackVersions(ctx context.Context, req *connect.Request[orkestraV1.ListStackVersionsRequest]) (*connect.Response[orkestraV1.ListStackVersionsResponse], error) {
-	return connect.NewResponse(&orkestraV1.ListStackVersionsResponse{}), nil
-}
-
-func (h *StackServiceHandler) AssignStack(ctx context.Context, req *connect.Request[orkestraV1.AssignStackRequest]) (*connect.Response[orkestraV1.Assignment], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("not yet implemented"))
-}
-
-func (h *StackServiceHandler) UnassignStack(ctx context.Context, req *connect.Request[orkestraV1.UnassignStackRequest]) (*connect.Response[orkestraV1.Empty], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("not yet implemented"))
-}
-
-func (h *StackServiceHandler) RollbackStack(ctx context.Context, req *connect.Request[orkestraV1.RollbackStackRequest]) (*connect.Response[orkestraV1.Assignment], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("not yet implemented"))
-}
+// Stack CRUD implementations are in stacks_crud.go.
 
 func (h *StackServiceHandler) ExecOnContainer(ctx context.Context, req *connect.Request[orkestraV1.ExecOnContainerRequest]) (*connect.Response[orkestraV1.ExecOnContainerResponse], error) {
 	sess := h.registry.Get(req.Msg.ServerId)

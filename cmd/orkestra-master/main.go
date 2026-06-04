@@ -20,6 +20,7 @@ import (
 	masterapi "github.com/heckertobias/orkestra/internal/master/api"
 	"github.com/heckertobias/orkestra/internal/master/keys"
 	"github.com/heckertobias/orkestra/internal/master/pki"
+	masterreconciler "github.com/heckertobias/orkestra/internal/master/reconciler"
 	"github.com/heckertobias/orkestra/internal/master/store"
 	"github.com/heckertobias/orkestra/internal/shared/version"
 	"github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1/orkestrav1connect"
@@ -124,8 +125,12 @@ func main() {
 		}
 	})
 
+	// --- Master Reconciler (polls assignments → pushes ApplyDesiredState) ---
+	rec := masterreconciler.New(db, registry, 15*time.Second)
+	go rec.Run(ctx)
+
 	// --- UI API (StackService) ---
-	stackHandler := masterapi.NewStackServiceHandler(db, registry)
+	stackHandler := masterapi.NewStackServiceHandler(db, registry, func() { rec.PushNow(ctx) })
 	stackPath, stackSvcHandler := orkestrav1connect.NewStackServiceHandler(stackHandler,
 		connect.WithCompressMinBytes(1024),
 	)
