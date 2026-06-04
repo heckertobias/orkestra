@@ -1,0 +1,262 @@
+package agentgw
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"connectrpc.com/connect"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/heckertobias/orkestra/internal/master/pki"
+	orkestraV1 "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1"
+)
+
+const certTTL = 365 * 24 * time.Hour
+
+// Handler implements AgentServiceHandler (the Connect/gRPC server side).
+type Handler struct {
+	db       *pgxpool.Pool
+	ca       *pki.CA
+	registry *Registry
+}
+
+// NewHandler creates an AgentService handler.
+func NewHandler(db *pgxpool.Pool, ca *pki.CA, registry *Registry) *Handler {
+	return &Handler{db: db, ca: ca, registry: registry}
+}
+
+// Enroll handles one-time Agent enrollment: validates the bootstrap token, signs the CSR,
+// creates a server record, and persists the certificate.
+func (h *Handler) Enroll(ctx context.Context, req *connect.Request[orkestraV1.EnrollRequest]) (*connect.Response[orkestraV1.EnrollResponse], error) {
+	r := req.Msg
+	if r.BootstrapToken == "" || r.CsrPem == "" || r.NodeInfo == nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("bootstrap_token, csr_pem, and node_info are required"))
+	}
+
+	// Validate token.
+	_, err := pki.ValidateEnrollmentToken(ctx, h.db, r.BootstrapToken)
+	if err != nil {
+		slog.Warn("enrollment token validation failed", "err", err)
+		return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("invalid or expired bootstrap token"))
+	}
+
+	// Sign CSR.
+	certPEM, serial, err := h.ca.SignCSR(r.CsrPem, certTTL)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("sign CSR: %w", err))
+	}
+	fingerprint, err := pki.CertFingerprint(certPEM)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	// Create or update server record.
+	agentID := uuid.NewString()
+	now := time.Now().UnixMilli()
+	info := r.NodeInfo
+
+	hostname := info.Hostname
+	if hostname == "" {
+		hostname = "unknown"
+	}
+	name := hostname
+	if info.Hostname != "" {
+		name = info.Hostname
+	}
+
+	_, err = h.db.Exec(ctx, `
+		INSERT INTO servers (id, name, hostname, arch, os, agent_version, docker_version, labels, status, enrolled_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, '{}', 'offline', $8)`,
+		agentID, name, hostname, info.Arch, info.Os,
+		info.AgentVersion, info.DockerVersion, now,
+	)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("create server record: %w", err))
+	}
+
+	// Persist certificate.
+	notBefore := time.Now().Add(-time.Minute).UnixMilli()
+	notAfter := time.Now().Add(certTTL).UnixMilli()
+	_, err = h.db.Exec(ctx, `
+		INSERT INTO certificates (serial, agent_id, fingerprint, cert_pem, not_before, not_after, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		serial, agentID, fingerprint, certPEM, notBefore, notAfter, now,
+	)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("persist certificate: %w", err))
+	}
+
+	slog.Info("agent enrolled",
+		"agent_id", agentID,
+		"hostname", hostname,
+		"arch", info.Arch,
+	)
+
+	return connect.NewResponse(&orkestraV1.EnrollResponse{
+		AgentId:       agentID,
+		ClientCertPem: certPEM,
+		CaBundlePem:   h.ca.CertPEM(),
+	}), nil
+}
+
+// Connect handles the persistent bidi-stream after mTLS enrollment.
+func (h *Handler) Connect(ctx context.Context, stream *connect.BidiStream[orkestraV1.AgentMessage, orkestraV1.MasterMessage]) error {
+	// Extract agentID from the mTLS client certificate CN.
+	agentID, err := agentIDFromContext(ctx)
+	if err != nil {
+		return connect.NewError(connect.CodeUnauthenticated, err)
+	}
+
+	session := h.registry.Register(agentID, agentID)
+	defer h.registry.Unregister(agentID)
+
+	// Mark server online.
+	h.setServerStatus(ctx, agentID, "online")
+
+	// Send loop: forward queued MasterMessages to the Agent.
+	sendErr := make(chan error, 1)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				sendErr <- nil
+				return
+			case <-session.done:
+				sendErr <- nil
+				return
+			case msg := <-session.send:
+				if err := stream.Send(msg); err != nil {
+					sendErr <- err
+					return
+				}
+			}
+		}
+	}()
+
+	// Receive loop: process AgentMessages.
+	for {
+		msg, err := stream.Receive()
+		if err != nil {
+			break
+		}
+		h.registry.UpdateLastSeen(agentID, time.Now())
+		h.handleAgentMessage(ctx, agentID, msg)
+	}
+
+	h.setServerStatus(context.Background(), agentID, "offline")
+	return nil
+}
+
+// RenewCert handles certificate renewal for an already-enrolled Agent.
+func (h *Handler) RenewCert(ctx context.Context, req *connect.Request[orkestraV1.RenewCertRequest]) (*connect.Response[orkestraV1.RenewCertResponse], error) {
+	agentID, err := agentIDFromContext(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, err)
+	}
+
+	certPEM, serial, err := h.ca.SignCSR(req.Msg.CsrPem, certTTL)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("sign CSR: %w", err))
+	}
+	fingerprint, err := pki.CertFingerprint(certPEM)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	now := time.Now().UnixMilli()
+	_, err = h.db.Exec(ctx, `
+		INSERT INTO certificates (serial, agent_id, fingerprint, cert_pem, not_before, not_after, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		serial, agentID, fingerprint, certPEM,
+		time.Now().Add(-time.Minute).UnixMilli(), time.Now().Add(certTTL).UnixMilli(), now,
+	)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("persist renewed cert: %w", err))
+	}
+
+	slog.Info("agent cert renewed", "agent_id", agentID)
+	return connect.NewResponse(&orkestraV1.RenewCertResponse{
+		ClientCertPem: certPEM,
+		CaBundlePem:   h.ca.CertPEM(),
+	}), nil
+}
+
+func (h *Handler) handleAgentMessage(ctx context.Context, agentID string, msg *orkestraV1.AgentMessage) {
+	switch p := msg.Payload.(type) {
+	case *orkestraV1.AgentMessage_Hello:
+		h.handleHello(ctx, agentID, p.Hello)
+	case *orkestraV1.AgentMessage_StatusReport:
+		h.handleStatusReport(ctx, agentID, p.StatusReport)
+	case *orkestraV1.AgentMessage_Pong:
+		// heartbeat acknowledged
+	default:
+		slog.Debug("unhandled agent message type", "agent_id", agentID)
+	}
+}
+
+func (h *Handler) handleHello(ctx context.Context, agentID string, hello *orkestraV1.Hello) {
+	now := time.Now().UnixMilli()
+	_, err := h.db.Exec(ctx, `
+		UPDATE servers SET
+			agent_version  = $1,
+			docker_version = $2,
+			hostname       = $3,
+			arch           = $4,
+			os             = $5,
+			status         = 'online',
+			last_seen_at   = $6
+		WHERE id = $7`,
+		hello.AgentVersion, hello.DockerVersion, hello.Hostname,
+		hello.Arch, hello.Os, now, agentID,
+	)
+	if err != nil {
+		slog.Error("update server from Hello", "agent_id", agentID, "err", err)
+	}
+	slog.Info("agent hello received", "agent_id", agentID, "hostname", hello.Hostname)
+}
+
+func (h *Handler) handleStatusReport(ctx context.Context, agentID string, report *orkestraV1.StatusReport) {
+	now := time.Now().UnixMilli()
+	_, err := h.db.Exec(ctx,
+		`UPDATE servers SET status = 'online', last_seen_at = $1 WHERE id = $2`,
+		now, agentID,
+	)
+	if err != nil {
+		slog.Error("update server from StatusReport", "agent_id", agentID, "err", err)
+	}
+	slog.Debug("status report received",
+		"agent_id", agentID,
+		"stacks", len(report.Stacks),
+	)
+}
+
+func (h *Handler) setServerStatus(ctx context.Context, agentID, status string) {
+	now := time.Now().UnixMilli()
+	_, err := h.db.Exec(ctx,
+		`UPDATE servers SET status = $1, last_seen_at = $2 WHERE id = $3`,
+		status, now, agentID,
+	)
+	if err != nil {
+		slog.Error("set server status", "agent_id", agentID, "status", status, "err", err)
+	}
+}
+
+// agentIDFromContext extracts the Agent ID from the mTLS client certificate CN.
+func agentIDFromContext(ctx context.Context) (string, error) {
+	// ConnectRPC provides TLS peer info via the request's context in the http.Request.
+	// For now we extract from context value set by TLS middleware.
+	if id, ok := ctx.Value(agentIDKey{}).(string); ok && id != "" {
+		return id, nil
+	}
+	return "", fmt.Errorf("no agent ID in mTLS certificate")
+}
+
+type agentIDKey struct{}
+
+// WithAgentID returns a context carrying the agent ID extracted from the mTLS cert.
+func WithAgentID(ctx context.Context, agentID string) context.Context {
+	return context.WithValue(ctx, agentIDKey{}, agentID)
+}

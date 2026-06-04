@@ -29,20 +29,20 @@
 
 **Goal:** An Agent can enroll and maintain a persistent authenticated connection to the Master.
 
-- [ ] `internal/master/keys/`: `KeySource` interface + `file` (default) and `env` (dev/warn) implementations
-- [ ] `internal/master/pki/`: CA generation on first start, KEK-encrypted storage (via `KeySource`), CSR signing
-- [ ] `internal/master/store/`: full schema migration, sqlc queries for servers + enrollment_tokens + certificates
-- [ ] `AgentService.Enroll` RPC handler (token validation, CSR signing, server record creation)
-- [ ] `AgentService.Connect` RPC handler (mTLS verification, session registry registration)
-- [ ] `internal/master/agentgw/`: session registry (`agentID → stream`), Hello processing, heartbeat/offline detection
-- [ ] `internal/agent/enroll/`: keypair generation, CSR creation, Enroll RPC call, cert persistence
-- [ ] `internal/agent/conn/`: mTLS dial, `Connect` stream, exponential backoff reconnect, Hello send
-- [ ] Agent sends periodic `StatusReport` (empty stacks list for now) as heartbeat
-- [ ] Master marks server `online` on Hello, `offline` after 3 missed heartbeats
-- [ ] `install-agent.sh` basic version (enroll + systemd install)
-- [ ] `make dev-agent` works against local Master
+- [x] `internal/master/keys/`: `KeySource` interface + `file` (default) and `env` (dev/warn) implementations
+- [x] `internal/master/pki/`: CA generation on first start, KEK-encrypted storage (via `KeySource`), CSR signing
+- [x] `internal/master/store/`: full schema migration, sqlc queries for servers + enrollment_tokens + certificates
+- [x] `AgentService.Enroll` RPC handler (token validation, CSR signing, server record creation)
+- [x] `AgentService.Connect` RPC handler (mTLS verification, session registry registration)
+- [x] `internal/master/agentgw/`: session registry (`agentID → stream`), Hello processing, heartbeat/offline detection
+- [x] `internal/agent/enroll/`: keypair generation, CSR creation, Enroll RPC call, cert persistence
+- [x] `internal/agent/conn/`: mTLS dial, `Connect` stream, exponential backoff reconnect, Hello send
+- [x] Agent sends periodic `StatusReport` (empty stacks list for now) as heartbeat
+- [x] Master marks server `online` on Hello, `offline` after 3 missed heartbeats
+- [x] `install-agent.sh` basic version (enroll + systemd install)
+- [x] `make dev-agent` works against local Master
 
-**Result:** `orkestra-agent enroll --master ... --bootstrap-token ...` completes; agent appears online in Master logs.
+**Result:** ✅ `orkestra-agent enroll --master ... --bootstrap-token ...` completes; agent appears online in Master logs.
 
 ---
 

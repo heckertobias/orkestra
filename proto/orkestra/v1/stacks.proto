@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package orkestra.v1;
 
+import "orkestra/v1/common.proto";
+
 option go_package = "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1;orkestraV1";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -232,8 +234,4 @@ message Event {
   string detail_json  = 8;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared
-// ─────────────────────────────────────────────────────────────────────────────
-
-message Empty {}
+// Empty is defined in common.proto and shared across all services.
