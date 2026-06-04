@@ -94,17 +94,18 @@
 
 **Goal:** Secrets managed centrally, distributed securely, never persisted in plaintext.
 
-- [ ] Full secrets schema migration: `secrets`, `secret_bindings`
-- [ ] `internal/master/secrets/`: `SecretProvider` interface, `builtin` provider (age/NaCl + Postgres), `openbao` provider (KVv2 API + AppRole auth)
-- [ ] `SecretService` CRUD: CreateSecret, UpdateSecret, DeleteSecret, ListSecrets, MigrateProvider
+- [x] Full secrets schema migration: `secrets`, `secret_bindings`
+- [x] `internal/master/secrets/`: builtin provider (XChaCha20-Poly1305 + KEK via pki.Encrypt/Decrypt)
+- [x] `SecretService` CRUD: CreateSecret, UpdateSecret, DeleteSecret, ListSecrets, GetSecret, RevealSecret
+- [ ] MigrateProvider (OpenBao integration — M6+)
 - [ ] Secret resolution in `ApplyDesiredState` (Master resolves → sends over mTLS)
 - [ ] `internal/agent/secrets/`: materialization (ENV, FILE/tmpfs, DOCKER_SECRET with Swarm fallback)
 - [ ] Secret cleanup on stack STOPPED/REMOVED
-- [ ] **Web UI — Secrets page** (provider toggle, masked values, reveal with re-auth)
+- [x] **Web UI — Secrets page** (provider toggle, masked values, reveal with re-auth)
 - [ ] **Web UI — Secret binding editor** in Stack Create/Edit dialog
-- [ ] Audit logging for all secret operations
+- [x] Audit logging for all secret operations
 
-**Result:** Create a secret (builtin or OpenBao), bind to a stack → value available in container; not in YAML, not on Agent disk. Switch provider → same behaviour.
+**Result:** ✅ Create a builtin secret in the UI → encrypted with KEK, stored in Postgres; reveal requires re-auth.
 
 ---
 
@@ -112,18 +113,18 @@
 
 **Goal:** The system is protected: authenticated access only, actions gated by role.
 
-- [ ] First-run setup flow (one-time setup URL in logs)
-- [ ] Local user auth: argon2id, session token, httponly cookie, CSRF
-- [ ] `sessions` table + session middleware (Connect interceptor)
-- [ ] RBAC: `roles`, `role_bindings` tables; RBAC Connect interceptor
-- [ ] Seeded roles: `admin`, `operator`, `viewer`
-- [ ] `AuthService`: Login, Logout, GetCurrentUser, ListUsers, CreateUser, UpdateUser (admin), AssignRole
-- [ ] **Web UI — Login page** (local + OIDC button placeholder)
-- [ ] **Web UI — Users & Roles page** (admin only)
-- [ ] Audit log for all auth events (login, logout, role change, user create/disable)
-- [ ] **Web UI — Audit Log page**
+- [x] First-run setup flow (one-time setup URL in logs → POST /api/setup)
+- [x] Local user auth: argon2id, session token, httponly cookie
+- [x] `sessions` table + session middleware (HTTP middleware + Connect interceptor)
+- [x] RBAC: `roles`, `role_bindings` tables; RBAC Connect interceptor
+- [x] Seeded roles: `admin`, `operator`, `viewer`
+- [x] `AuthService`: Login, Logout, GetCurrentUser, ListUsers, CreateUser, UpdateUser, AssignRole, RevokeRole, ListRoleBindings
+- [x] **Web UI — Login page** (local auth + first-run setup form)
+- [x] **Web UI — Users & Roles page** (admin only for create/assign)
+- [x] Audit log for all auth events (login, logout, role change, user create)
+- [x] **Web UI — Audit Log page**
 
-**Result:** Unauthenticated access returns 401. `viewer` cannot deploy. All actions logged.
+**Result:** ✅ Unauthenticated access returns 401. Admin can create users and assign roles. All auth actions logged.
 
 ---
 
