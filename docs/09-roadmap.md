@@ -50,19 +50,19 @@
 
 **Goal:** Manage individual containers on remote servers via the browser.
 
-- [ ] `internal/agent/dockerctl/`: ContainerList, ContainerStart, ContainerStop, ContainerRestart, ContainerRemove, ImagePull
-- [ ] `internal/agent/telemetry/`: LogStream (bridge Docker logs to LogChunk messages), StatsStream (bridge docker stats to StatsChunk)
-- [ ] Master bridges `StreamLogs` + `StreamStats` requests: browser → Master → Agent → Master → browser
-- [ ] `AgentService.Connect`: handle `ExecCommand` (start/stop/restart/pull/rm) dispatch, return `CommandResult`
-- [ ] `StackService.ListServers`, `StackService.GetServer` — query from DB + merge with agentgw session state
-- [ ] **Web UI — Vite + React + TypeScript scaffold** (`npm create vite`), Tailwind v4, shadcn/ui dark theme with custom colour tokens (see `docs/07-web-ui.md` — Branding section)
+- [x] `internal/agent/dockerctl/`: ContainerList, ContainerStart, ContainerStop, ContainerRestart, ContainerRemove, ImagePull
+- [x] `internal/agent/telemetry/`: LogStream (bridge Docker logs to LogChunk messages), StatsStream (bridge docker stats to StatsChunk)
+- [x] Master bridges `StreamLogs` + `StreamStats` requests: browser → Master → Agent → Master → browser (stub, full bridging in integration pass)
+- [x] `AgentService.Connect`: handle `ExecCommand` (start/stop/restart/pull/rm) dispatch, return `CommandResult`
+- [x] `StackService.ListServers`, `StackService.GetServer` — query from DB + merge with agentgw session state
+- [x] **Web UI — Vite + React + TypeScript scaffold**, Tailwind v4, dark theme with brand colour tokens
 - [ ] **Logo & brand assets:** SVG logo variants (full illustration, head icon, wordmark) in `web/src/assets/`; favicon + app icon derived from head icon
-- [ ] **Web UI — Server List page:** server cards with online/offline status
-- [ ] **Web UI — Server Detail page:** container table, start/stop/restart/pull/remove actions
-- [ ] **Web UI — Live Logs drawer:** streaming log output with follow toggle
-- [ ] **Web UI — Live Stats:** CPU/memory bar chart per container (basic, polling ok for now)
+- [x] **Web UI — Server List page:** server cards with online/offline status
+- [x] **Web UI — Server Detail page:** container table, start/stop/restart/pull/remove actions
+- [ ] **Web UI — Live Logs drawer:** streaming log output with follow toggle (M6 stream bridging)
+- [ ] **Web UI — Live Stats:** CPU/memory bar chart per container (M6 stream bridging)
 
-**Result:** A user can open the browser, see all servers, and control individual containers with live log access.
+**Result:** ✅ Both binaries build; Server List and Server Detail pages render; container actions dispatch to Agent.
 
 ---
 

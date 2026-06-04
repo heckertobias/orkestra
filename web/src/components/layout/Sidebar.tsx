@@ -1,0 +1,54 @@
+import { NavLink } from 'react-router-dom'
+import { Server, Layers, KeyRound, Users, LayoutDashboard, Settings } from 'lucide-react'
+import { cn } from '@/lib/cn'
+
+const nav = [
+  { to: '/',         label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/servers',  label: 'Servers',   icon: Server },
+  { to: '/stacks',   label: 'Stacks',    icon: Layers },
+  { to: '/secrets',  label: 'Secrets',   icon: KeyRound },
+  { to: '/users',    label: 'Users',     icon: Users },
+  { to: '/settings', label: 'Settings',  icon: Settings },
+]
+
+export function Sidebar() {
+  return (
+    <aside
+      className="flex flex-col w-52 shrink-0 h-full border-r"
+      style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)' }}
+    >
+      {/* Logo */}
+      <div className="flex items-center gap-3 px-4 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
+        <div
+          className="w-7 h-7 rounded flex items-center justify-center text-xs font-bold"
+          style={{ backgroundColor: 'var(--accent)', color: '#0d1117' }}
+        >
+          O
+        </div>
+        <span className="font-semibold text-sm" style={{ color: 'var(--text)' }}>
+          ork<span style={{ color: 'var(--accent)' }}>estra</span>
+        </span>
+      </div>
+
+      {/* Navigation */}
+      <nav className="flex-1 px-2 py-3 space-y-0.5">
+        {nav.map(({ to, label, icon: Icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={to === '/'}
+            className={({ isActive }) => cn(
+              'flex items-center gap-3 px-3 py-2 rounded text-sm transition-colors',
+              isActive
+                ? 'text-[var(--accent)] bg-[rgba(126,226,42,0.08)]'
+                : 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)]',
+            )}
+          >
+            <Icon size={16} />
+            {label}
+          </NavLink>
+        ))}
+      </nav>
+    </aside>
+  )
+}

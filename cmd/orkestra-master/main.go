@@ -17,6 +17,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 
 	"github.com/heckertobias/orkestra/internal/master/agentgw"
+	masterapi "github.com/heckertobias/orkestra/internal/master/api"
 	"github.com/heckertobias/orkestra/internal/master/keys"
 	"github.com/heckertobias/orkestra/internal/master/pki"
 	"github.com/heckertobias/orkestra/internal/master/store"
@@ -123,8 +124,15 @@ func main() {
 		}
 	})
 
+	// --- UI API (StackService) ---
+	stackHandler := masterapi.NewStackServiceHandler(db, registry)
+	stackPath, stackSvcHandler := orkestrav1connect.NewStackServiceHandler(stackHandler,
+		connect.WithCompressMinBytes(1024),
+	)
+
 	// --- UI / API server (plain HTTP/2 with h2c for dev, TLS in prod) ---
 	uiMux := http.NewServeMux()
+	uiMux.Handle(stackPath, stackSvcHandler)
 	uiMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
