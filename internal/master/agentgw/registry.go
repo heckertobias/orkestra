@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	mastermetrics "github.com/heckertobias/orkestra/internal/master/metrics"
 	orkestraV1 "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1"
 )
 
@@ -53,6 +54,7 @@ func (r *Registry) Register(agentID, serverID string) *Session {
 	r.mu.Lock()
 	r.sessions[agentID] = s
 	r.mu.Unlock()
+	mastermetrics.AgentsConnected.Inc()
 	slog.Info("agent connected", "agent_id", agentID)
 	return s
 }
@@ -65,6 +67,8 @@ func (r *Registry) Unregister(agentID string) {
 		delete(r.sessions, agentID)
 	}
 	r.mu.Unlock()
+	mastermetrics.AgentsConnected.Dec()
+	mastermetrics.AgentsOffline.Inc()
 	slog.Info("agent disconnected", "agent_id", agentID)
 }
 

@@ -2,16 +2,35 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/lib/auth'
 
+// Check at load time if OIDC is enabled — best-effort, silently ignored.
+async function checkOIDCEnabled(): Promise<boolean> {
+  try {
+    const res = await fetch('/orkestra.v1.AuthService/GetOIDCConfig', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+    if (!res.ok) return false
+    const d = await res.json()
+    return Boolean(d.enabled)
+  } catch {
+    return false
+  }
+}
+
 export function LoginPage() {
   const { login, user } = useAuth()
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const setupToken = params.get('setup') ?? ''
 
+  const isSetup = Boolean(setupToken)
+
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [oidcEnabled, setOidcEnabled] = useState(false)
 
   // Setup mode state
   const [setupDisplayName, setSetupDisplayName] = useState('')
@@ -19,6 +38,10 @@ export function LoginPage() {
   useEffect(() => {
     if (user) navigate('/', { replace: true })
   }, [user, navigate])
+
+  useEffect(() => {
+    if (!isSetup) checkOIDCEnabled().then(setOidcEnabled)
+  }, [isSetup])
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
@@ -57,8 +80,6 @@ export function LoginPage() {
       setBusy(false)
     }
   }
-
-  const isSetup = Boolean(setupToken)
 
   return (
     <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg)' }}>
@@ -136,6 +157,23 @@ export function LoginPage() {
               {busy ? (isSetup ? 'Setting up…' : 'Signing in…') : (isSetup ? 'Create account & sign in' : 'Sign in')}
             </button>
           </form>
+
+          {!isSetup && oidcEnabled && (
+            <>
+              <div className="flex items-center gap-2 my-4">
+                <hr className="flex-1" style={{ borderColor: 'var(--border)' }} />
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>or</span>
+                <hr className="flex-1" style={{ borderColor: 'var(--border)' }} />
+              </div>
+              <a
+                href="/auth/oidc/login"
+                className="w-full py-2 rounded text-sm font-medium flex items-center justify-center border transition-colors hover:bg-[var(--surface-2)]"
+                style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+              >
+                Sign in with SSO
+              </a>
+            </>
+          )}
 
           {!isSetup && (
             <p className="mt-4 text-center text-xs" style={{ color: 'var(--text-muted)' }}>

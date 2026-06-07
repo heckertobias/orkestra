@@ -14,6 +14,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	agentmetrics "github.com/heckertobias/orkestra/internal/agent/metrics"
 	"github.com/heckertobias/orkestra/internal/agent/enroll"
 	"github.com/heckertobias/orkestra/internal/shared/version"
 	orkestraV1 "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1"
@@ -47,6 +48,7 @@ func (a *Agent) RunForever(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
+			agentmetrics.StreamReconnectsTotal.Inc()
 			wait := backoff(attempt)
 			slog.Warn("agent connection lost, reconnecting",
 				"err", err,

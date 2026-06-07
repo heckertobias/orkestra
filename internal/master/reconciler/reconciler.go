@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/heckertobias/orkestra/internal/master/agentgw"
+	mastermetrics "github.com/heckertobias/orkestra/internal/master/metrics"
 	"github.com/heckertobias/orkestra/internal/master/store"
 	orkestraV1 "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1"
 )
@@ -68,6 +69,7 @@ func (r *Reconciler) push(ctx context.Context) {
 				ApplyDesiredState: state,
 			},
 		})
+		mastermetrics.ReconcilePushTotal.Inc()
 		slog.Debug("pushed desired state", "agent_id", agentID, "stacks", len(state.Stacks))
 	}
 }

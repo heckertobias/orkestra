@@ -2,6 +2,9 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -13,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	masterauth "github.com/heckertobias/orkestra/internal/master/auth"
+	"github.com/heckertobias/orkestra/internal/master/pki"
 	"github.com/heckertobias/orkestra/internal/master/store"
 	orkestraV1 "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1"
 )
@@ -23,12 +27,13 @@ const sessionTTL = 24 * time.Hour
 type AuthServiceHandler struct {
 	db         *pgxpool.Pool
 	q          *store.Queries
+	kek        []byte
 	setupToken *string // non-nil when first-run setup is pending
 }
 
 // NewAuthServiceHandler constructs an AuthServiceHandler.
-func NewAuthServiceHandler(db *pgxpool.Pool, setupToken *string) *AuthServiceHandler {
-	return &AuthServiceHandler{db: db, q: store.New(db), setupToken: setupToken}
+func NewAuthServiceHandler(db *pgxpool.Pool, kek []byte, setupToken *string) *AuthServiceHandler {
+	return &AuthServiceHandler{db: db, q: store.New(db), kek: kek, setupToken: setupToken}
 }
 
 // AuditLogHTTPHandler returns audit log entries as JSON (GET /api/audit).
@@ -372,14 +377,151 @@ func (h *AuthServiceHandler) RevokeRole(ctx context.Context, req *connect.Reques
 	return connect.NewResponse(&orkestraV1.AuthEmpty{}), nil
 }
 
-// GetOIDCConfig returns the OIDC configuration (placeholder).
-func (h *AuthServiceHandler) GetOIDCConfig(_ context.Context, _ *connect.Request[orkestraV1.AuthEmpty]) (*connect.Response[orkestraV1.OIDCConfig], error) {
-	return connect.NewResponse(&orkestraV1.OIDCConfig{Enabled: false}), nil
+// GetOIDCConfig returns the current OIDC configuration.
+func (h *AuthServiceHandler) GetOIDCConfig(ctx context.Context, _ *connect.Request[orkestraV1.AuthEmpty]) (*connect.Response[orkestraV1.OIDCConfig], error) {
+	if err := requireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
+	cfg, err := h.q.GetOIDCConfig(ctx)
+	if err != nil {
+		// No config yet — return disabled empty config.
+		return connect.NewResponse(&orkestraV1.OIDCConfig{Enabled: false}), nil
+	}
+	var scopes []string
+	_ = json.Unmarshal(cfg.Scopes, &scopes)
+	var claimMapping map[string]string
+	_ = json.Unmarshal(cfg.ClaimMapping, &claimMapping)
+	return connect.NewResponse(&orkestraV1.OIDCConfig{
+		Enabled:      cfg.Enabled,
+		IssuerUrl:    cfg.IssuerUrl,
+		ClientId:     cfg.ClientID,
+		Scopes:       scopes,
+		ClaimMapping: claimMapping,
+	}), nil
 }
 
-// UpdateOIDCConfig updates OIDC config (placeholder — M6).
-func (h *AuthServiceHandler) UpdateOIDCConfig(_ context.Context, _ *connect.Request[orkestraV1.UpdateOIDCConfigRequest]) (*connect.Response[orkestraV1.OIDCConfig], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("OIDC configuration available in M6"))
+// UpdateOIDCConfig stores an encrypted OIDC configuration.
+func (h *AuthServiceHandler) UpdateOIDCConfig(ctx context.Context, req *connect.Request[orkestraV1.UpdateOIDCConfigRequest]) (*connect.Response[orkestraV1.OIDCConfig], error) {
+	if err := requireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
+	r := req.Msg
+
+	// Encrypt the client secret with KEK.
+	secretEnc := ""
+	if r.ClientSecret != "" {
+		enc, err := pki.Encrypt(h.kek, []byte(r.ClientSecret))
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("encrypt secret: %w", err))
+		}
+		secretEnc = base64.StdEncoding.EncodeToString(enc)
+	} else {
+		// Keep the existing encrypted secret.
+		existing, err := h.q.GetOIDCConfig(ctx)
+		if err == nil {
+			secretEnc = existing.ClientSecretEnc
+		}
+	}
+
+	scopes := r.Scopes
+	if len(scopes) == 0 {
+		scopes = []string{"openid", "profile", "email"}
+	}
+	scopesJSON, _ := json.Marshal(scopes)
+	claimJSON, _ := json.Marshal(r.ClaimMapping)
+
+	cfg, err := h.q.UpsertOIDCConfig(ctx, store.UpsertOIDCConfigParams{
+		IssuerUrl:       r.IssuerUrl,
+		ClientID:        r.ClientId,
+		ClientSecretEnc: secretEnc,
+		Scopes:          scopesJSON,
+		ClaimMapping:    claimJSON,
+		Enabled:         r.Enabled,
+		UpdatedAt:       time.Now().UnixMilli(),
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("save oidc config: %w", err))
+	}
+
+	var respScopes []string
+	_ = json.Unmarshal(cfg.Scopes, &respScopes)
+	var claimMapping map[string]string
+	_ = json.Unmarshal(cfg.ClaimMapping, &claimMapping)
+	return connect.NewResponse(&orkestraV1.OIDCConfig{
+		Enabled:      cfg.Enabled,
+		IssuerUrl:    cfg.IssuerUrl,
+		ClientId:     cfg.ClientID,
+		Scopes:       respScopes,
+		ClaimMapping: claimMapping,
+	}), nil
+}
+
+// ListAPIKeys returns API keys for the current user (or all if admin with user_id).
+func (h *AuthServiceHandler) ListAPIKeys(ctx context.Context, req *connect.Request[orkestraV1.ListAPIKeysRequest]) (*connect.Response[orkestraV1.ListAPIKeysResponse], error) {
+	u := masterauth.UserFromContext(ctx)
+	if u == nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("not authenticated"))
+	}
+	userID := u.ID
+	if req.Msg.UserId != "" {
+		if err := requireRole(ctx, "admin"); err != nil {
+			return nil, err
+		}
+		userID = req.Msg.UserId
+	}
+	rows, err := h.q.ListAPIKeysByUser(ctx, userID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list api keys: %w", err))
+	}
+	keys := make([]*orkestraV1.APIKey, 0, len(rows))
+	for _, row := range rows {
+		keys = append(keys, apiKeyToProto(row, ""))
+	}
+	return connect.NewResponse(&orkestraV1.ListAPIKeysResponse{Keys: keys}), nil
+}
+
+// CreateAPIKey generates a new API key for the current user.
+func (h *AuthServiceHandler) CreateAPIKey(ctx context.Context, req *connect.Request[orkestraV1.CreateAPIKeyRequest]) (*connect.Response[orkestraV1.APIKey], error) {
+	u := masterauth.UserFromContext(ctx)
+	if u == nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("not authenticated"))
+	}
+	if req.Msg.Name == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("name required"))
+	}
+
+	rawKey, keyHash, err := generateAPIKey()
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("generate key: %w", err))
+	}
+	var expiresAt *int64
+	if req.Msg.ExpiresAt > 0 {
+		expiresAt = &req.Msg.ExpiresAt
+	}
+	row, err := h.q.InsertAPIKey(ctx, store.InsertAPIKeyParams{
+		ID:        uuid.NewString(),
+		UserID:    u.ID,
+		Name:      req.Msg.Name,
+		KeyHash:   keyHash,
+		CreatedAt: time.Now().UnixMilli(),
+		ExpiresAt: expiresAt,
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("insert api key: %w", err))
+	}
+	return connect.NewResponse(apiKeyToProto(row, rawKey)), nil
+}
+
+// RevokeAPIKey revokes an API key.
+func (h *AuthServiceHandler) RevokeAPIKey(ctx context.Context, req *connect.Request[orkestraV1.RevokeAPIKeyRequest]) (*connect.Response[orkestraV1.AuthEmpty], error) {
+	u := masterauth.UserFromContext(ctx)
+	if u == nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("not authenticated"))
+	}
+	if err := h.q.RevokeAPIKey(ctx, req.Msg.Id); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("revoke api key: %w", err))
+	}
+	return connect.NewResponse(&orkestraV1.AuthEmpty{}), nil
 }
 
 // ListEnrollmentTokens lists all enrollment tokens.
@@ -488,6 +630,35 @@ func requireRole(ctx context.Context, roles ...string) error {
 		return connect.NewError(connect.CodePermissionDenied, fmt.Errorf("requires role: %v", roles))
 	}
 	return nil
+}
+
+func generateAPIKey() (rawKey, keyHash string, err error) {
+	b := make([]byte, 32)
+	if _, err = rand.Read(b); err != nil {
+		return
+	}
+	rawKey = "ork_" + base64.URLEncoding.EncodeToString(b)
+	h := sha256.Sum256([]byte(rawKey))
+	keyHash = fmt.Sprintf("%x", h)
+	return
+}
+
+func apiKeyToProto(k store.APIKey, rawKey string) *orkestraV1.APIKey {
+	p := &orkestraV1.APIKey{
+		Id:        k.ID,
+		UserId:    k.UserID,
+		Name:      k.Name,
+		RawKey:    rawKey,
+		CreatedAt: k.CreatedAt,
+		Revoked:   k.Revoked,
+	}
+	if k.LastUsedAt != nil {
+		p.LastUsedAt = *k.LastUsedAt
+	}
+	if k.ExpiresAt != nil {
+		p.ExpiresAt = *k.ExpiresAt
+	}
+	return p
 }
 
 func (h *AuthServiceHandler) auditAuth(ctx context.Context, user *store.User, action string, detail *string) {

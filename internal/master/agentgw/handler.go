@@ -11,21 +11,40 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/heckertobias/orkestra/internal/master/pki"
+	"github.com/heckertobias/orkestra/internal/master/store"
 	orkestraV1 "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1"
 )
 
 const certTTL = 365 * 24 * time.Hour
+
+// EventFn is called to persist a system event.
+type EventFn func(ctx context.Context, p store.InsertEventParams)
 
 // Handler implements AgentServiceHandler (the Connect/gRPC server side).
 type Handler struct {
 	db       *pgxpool.Pool
 	ca       *pki.CA
 	registry *Registry
+	q        *store.Queries
+	emitFn   EventFn
 }
 
 // NewHandler creates an AgentService handler.
-func NewHandler(db *pgxpool.Pool, ca *pki.CA, registry *Registry) *Handler {
-	return &Handler{db: db, ca: ca, registry: registry}
+func NewHandler(db *pgxpool.Pool, ca *pki.CA, registry *Registry, emitFn EventFn) *Handler {
+	return &Handler{db: db, ca: ca, registry: registry, q: store.New(db), emitFn: emitFn}
+}
+
+func (h *Handler) emit(ctx context.Context, serverID *string, eventType, severity, message string) {
+	if h.emitFn == nil {
+		return
+	}
+	h.emitFn(ctx, store.InsertEventParams{
+		Ts:        time.Now().UnixMilli(),
+		ServerID:  serverID,
+		EventType: eventType,
+		Severity:  severity,
+		Message:   message,
+	})
 }
 
 // Enroll handles one-time Agent enrollment: validates the bootstrap token, signs the CSR,
@@ -115,6 +134,8 @@ func (h *Handler) Connect(ctx context.Context, stream *connect.BidiStream[orkest
 
 	// Mark server online.
 	h.setServerStatus(ctx, agentID, "online")
+	sid := agentID
+	h.emit(ctx, &sid, "agent", "info", "agent connected")
 
 	// Send loop: forward queued MasterMessages to the Agent.
 	sendErr := make(chan error, 1)
@@ -146,6 +167,8 @@ func (h *Handler) Connect(ctx context.Context, stream *connect.BidiStream[orkest
 		h.handleAgentMessage(ctx, agentID, msg)
 	}
 
+	sid2 := agentID
+	h.emit(context.Background(), &sid2, "agent", "warn", "agent disconnected")
 	h.setServerStatus(context.Background(), agentID, "offline")
 	return nil
 }

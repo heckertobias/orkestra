@@ -10,8 +10,9 @@ import { SecretsPage } from './pages/SecretsPage'
 import { LoginPage } from './pages/LoginPage'
 import { UsersPage } from './pages/UsersPage'
 import { AuditLogPage } from './pages/AuditLogPage'
-import { PlaceholderPage } from './pages/PlaceholderPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { AuthProvider, useAuth } from './lib/auth'
+import { ToastProvider } from './components/ui/toast'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 10_000 } },
@@ -29,20 +30,22 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <AuthProvider>
-          <Routes>
-            <Route path="login" element={<LoginPage />} />
-            <Route element={<AuthGuard><Layout /></AuthGuard>}>
-              <Route index element={<DashboardPage />} />
-              <Route path="servers" element={<ServersPage />} />
-              <Route path="servers/:id" element={<ServerDetailPage />} />
-              <Route path="stacks"      element={<StacksPage />} />
-              <Route path="stacks/:id"  element={<StackDetailPage />} />
-              <Route path="secrets"  element={<SecretsPage />} />
-              <Route path="users"    element={<UsersPage />} />
-              <Route path="audit"    element={<AuditLogPage />} />
-              <Route path="settings" element={<PlaceholderPage title="Settings" />} />
-            </Route>
-          </Routes>
+          <ToastProvider>
+            <Routes>
+              <Route path="login" element={<LoginPage />} />
+              <Route element={<AuthGuard><Layout /></AuthGuard>}>
+                <Route index element={<DashboardPage />} />
+                <Route path="servers" element={<ServersPage />} />
+                <Route path="servers/:id" element={<ServerDetailPage />} />
+                <Route path="stacks"      element={<StacksPage />} />
+                <Route path="stacks/:id"  element={<StackDetailPage />} />
+                <Route path="secrets"  element={<SecretsPage />} />
+                <Route path="users"    element={<UsersPage />} />
+                <Route path="audit"    element={<AuditLogPage />} />
+                <Route path="settings" element={<SettingsPage />} />
+              </Route>
+            </Routes>
+          </ToastProvider>
         </AuthProvider>
       </BrowserRouter>
     </QueryClientProvider>

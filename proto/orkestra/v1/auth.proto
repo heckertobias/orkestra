@@ -30,6 +30,11 @@ service AuthService {
   rpc ListEnrollmentTokens(AuthEmpty)                      returns (ListEnrollmentTokensResponse);
   rpc CreateEnrollmentToken(CreateEnrollmentTokenRequest)  returns (EnrollmentToken);
   rpc RevokeEnrollmentToken(RevokeEnrollmentTokenRequest)  returns (AuthEmpty);
+
+  // API keys (self-service for current user; admin can list all)
+  rpc ListAPIKeys(ListAPIKeysRequest)   returns (ListAPIKeysResponse);
+  rpc CreateAPIKey(CreateAPIKeyRequest) returns (APIKey);
+  rpc RevokeAPIKey(RevokeAPIKeyRequest) returns (AuthEmpty);
 }
 
 message User {
@@ -136,5 +141,27 @@ message CreateEnrollmentTokenRequest {
 }
 
 message RevokeEnrollmentTokenRequest { string id = 1; }
+
+message APIKey {
+  string id           = 1;
+  string user_id      = 2;
+  string name         = 3;
+  // raw_key only set on create response (shown once)
+  string raw_key      = 4;
+  int64  created_at   = 5;
+  int64  last_used_at = 6;
+  int64  expires_at   = 7;
+  bool   revoked      = 8;
+}
+
+message ListAPIKeysRequest  { string user_id = 1; } // empty = current user
+message ListAPIKeysResponse { repeated APIKey keys = 1; }
+
+message CreateAPIKeyRequest {
+  string name       = 1;
+  int64  expires_at = 2; // 0 = never expires
+}
+
+message RevokeAPIKeyRequest { string id = 1; }
 
 message AuthEmpty {}

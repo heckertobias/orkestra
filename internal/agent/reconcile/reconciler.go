@@ -10,6 +10,7 @@ import (
 
 	"github.com/docker/docker/client"
 
+	agentmetrics "github.com/heckertobias/orkestra/internal/agent/metrics"
 	"github.com/heckertobias/orkestra/internal/agent/compose"
 	orkestraV1 "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1"
 )
@@ -73,6 +74,7 @@ func (r *Reconciler) Run(ctx context.Context) {
 func (r *Reconciler) reconcile(ctx context.Context, state *orkestraV1.ApplyDesiredState) {
 	for _, stack := range state.Stacks {
 		if err := r.reconcileStack(ctx, stack); err != nil {
+			agentmetrics.ReconcileErrorsTotal.WithLabelValues(stack.StackId).Inc()
 			slog.Error("reconcile stack failed",
 				"stack_id", stack.StackId,
 				"err", err,
@@ -82,6 +84,10 @@ func (r *Reconciler) reconcile(ctx context.Context, state *orkestraV1.ApplyDesir
 }
 
 func (r *Reconciler) reconcileStack(ctx context.Context, s *orkestraV1.StackDesiredState) error {
+	start := time.Now()
+	defer func() {
+		agentmetrics.ReconcileDuration.Observe(time.Since(start).Seconds())
+	}()
 	if r.dc == nil {
 		slog.Warn("docker client not available, skipping reconcile", "stack_id", s.StackId)
 		return nil

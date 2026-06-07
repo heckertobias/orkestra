@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
@@ -21,6 +22,7 @@ import (
 	masterapi "github.com/heckertobias/orkestra/internal/master/api"
 	masterauth "github.com/heckertobias/orkestra/internal/master/auth"
 	"github.com/heckertobias/orkestra/internal/master/keys"
+	masteroidc "github.com/heckertobias/orkestra/internal/master/oidc"
 	"github.com/heckertobias/orkestra/internal/master/pki"
 	masterreconciler "github.com/heckertobias/orkestra/internal/master/reconciler"
 	"github.com/heckertobias/orkestra/internal/master/store"
@@ -35,10 +37,11 @@ var publicProcedures = map[string]bool{
 
 func main() {
 	var (
-		uiAddr    = flag.String("ui-addr", envOrDefault("ORKESTRA_UI_ADDR", "0.0.0.0:8080"), "UI & API listen address")
-		agentAddr = flag.String("agent-addr", envOrDefault("ORKESTRA_AGENT_ADDR", "0.0.0.0:8443"), "Agent gRPC listen address")
-		dbURL     = flag.String("db", envOrDefault("ORKESTRA_DATABASE_URL", ""), "PostgreSQL DSN (required)")
-		logLevel  = flag.String("log-level", envOrDefault("ORKESTRA_LOG_LEVEL", "info"), "Log level (debug|info|warn|error)")
+		uiAddr      = flag.String("ui-addr", envOrDefault("ORKESTRA_UI_ADDR", "0.0.0.0:8080"), "UI & API listen address")
+		agentAddr   = flag.String("agent-addr", envOrDefault("ORKESTRA_AGENT_ADDR", "0.0.0.0:8443"), "Agent gRPC listen address")
+		metricsAddr = flag.String("metrics-addr", envOrDefault("ORKESTRA_METRICS_ADDR", "0.0.0.0:9090"), "Prometheus metrics listen address")
+		dbURL       = flag.String("db", envOrDefault("ORKESTRA_DATABASE_URL", ""), "PostgreSQL DSN (required)")
+		logLevel    = flag.String("log-level", envOrDefault("ORKESTRA_LOG_LEVEL", "info"), "Log level (debug|info|warn|error)")
 	)
 	flag.Parse()
 
@@ -50,6 +53,7 @@ func main() {
 		"build_date", version.BuildDate,
 		"ui_addr", *uiAddr,
 		"agent_addr", *agentAddr,
+		"metrics_addr", *metricsAddr,
 	)
 
 	if *dbURL == "" {
@@ -105,9 +109,16 @@ func main() {
 			"url", fmt.Sprintf("%s/login?setup=%s", uiURL, setupToken))
 	}
 
+	// --- Event emitter ---
+	emitFn := agentgw.EventFn(func(ctx context.Context, p store.InsertEventParams) {
+		go func() {
+			_ = q.InsertEvent(context.Background(), p)
+		}()
+	})
+
 	// --- Agent Gateway ---
 	registry := agentgw.NewRegistry()
-	gwHandler := agentgw.NewHandler(db, ca, registry)
+	gwHandler := agentgw.NewHandler(db, ca, registry, emitFn)
 
 	agentMux := http.NewServeMux()
 	agentPath, agentSvcHandler := orkestrav1connect.NewAgentServiceHandler(gwHandler,
@@ -152,6 +163,13 @@ func main() {
 	rec := masterreconciler.New(db, registry, 15*time.Second)
 	go rec.Run(ctx)
 
+	// --- OIDC Provider ---
+	oidcRedirectURL := fmt.Sprintf("http://%s/auth/oidc/callback", *uiAddr)
+	oidcProvider := masteroidc.New(q, kek)
+	if err := oidcProvider.Reload(ctx, oidcRedirectURL); err != nil {
+		slog.Warn("OIDC provider init failed (non-fatal)", "err", err)
+	}
+
 	// --- Connect interceptors ---
 	authInterceptor := masterauth.NewAuthInterceptor(publicProcedures)
 	connectOpts := []connect.HandlerOption{
@@ -168,7 +186,7 @@ func main() {
 	secretPath, secretSvcHandler := orkestrav1connect.NewSecretServiceHandler(secretHandler, connectOpts...)
 
 	// --- AuthService ---
-	authHandler := masterapi.NewAuthServiceHandler(db, &setupToken)
+	authHandler := masterapi.NewAuthServiceHandler(db, kek, &setupToken)
 	authPath, authSvcHandler := orkestrav1connect.NewAuthServiceHandler(authHandler, connectOpts...)
 
 	// --- Session middleware ---
@@ -179,8 +197,10 @@ func main() {
 	uiMux.Handle(stackPath, stackSvcHandler)
 	uiMux.Handle(secretPath, secretSvcHandler)
 	uiMux.Handle(authPath, authSvcHandler)
-	uiMux.HandleFunc("/api/setup", authHandler.SetupHTTPHandler)
+	uiMux.HandleFunc("/api/setup", masterauth.RateLimitMiddleware(authHandler.SetupHTTPHandler))
 	uiMux.HandleFunc("/api/audit", authHandler.AuditLogHTTPHandler)
+	uiMux.HandleFunc("/auth/oidc/login", oidcProvider.LoginHandler)
+	uiMux.HandleFunc("/auth/oidc/callback", oidcProvider.CallbackHandler(q, 24*time.Hour))
 	uiMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -209,6 +229,20 @@ func main() {
 		}
 	}()
 
+	// --- Metrics server ---
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", promhttp.Handler())
+	metricsServer := &http.Server{
+		Addr:    *metricsAddr,
+		Handler: metricsMux,
+	}
+	go func() {
+		slog.Info("metrics server listening", "addr", *metricsAddr)
+		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("metrics server error", "err", err)
+		}
+	}()
+
 	<-ctx.Done()
 	slog.Info("shutting down...")
 
@@ -216,6 +250,7 @@ func main() {
 	defer cancel()
 	_ = uiServer.Shutdown(shutdownCtx)
 	_ = agentServer.Shutdown(shutdownCtx)
+	_ = metricsServer.Shutdown(shutdownCtx)
 	slog.Info("goodbye")
 }
 

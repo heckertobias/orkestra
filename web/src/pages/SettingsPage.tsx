@@ -1,0 +1,388 @@
+import { useState, useEffect } from 'react'
+import { Key, Shield, Plus, Trash2, Eye, EyeOff, Copy } from 'lucide-react'
+import { useToast } from '@/components/ui/toast'
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface OIDCConfig {
+  enabled: boolean
+  issuerUrl: string
+  clientId: string
+  scopes: string[]
+  claimMapping: Record<string, string>
+}
+
+interface APIKey {
+  id: string
+  name: string
+  createdAt: number
+  lastUsedAt: number
+  expiresAt: number
+  revoked: boolean
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function connectPost(procedure: string, body: unknown) {
+  return fetch(`/orkestra.v1.AuthService/${procedure}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+export function SettingsPage() {
+  const [tab, setTab] = useState<'oidc' | 'apikeys'>('oidc')
+
+  return (
+    <div>
+      <h1 className="text-xl font-semibold mb-1" style={{ color: 'var(--text)' }}>Settings</h1>
+      <p className="mb-6" style={{ color: 'var(--text-muted)' }}>SSO, API keys, and access configuration.</p>
+
+      <div className="flex gap-1 mb-6 border-b" style={{ borderColor: 'var(--border)' }}>
+        {([['oidc', 'SSO / OIDC', Shield], ['apikeys', 'API Keys', Key]] as const).map(([id, label, Icon]) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            className="flex items-center gap-2 px-4 py-2 text-sm border-b-2 -mb-px transition-colors"
+            style={{
+              borderColor: tab === id ? 'var(--accent)' : 'transparent',
+              color: tab === id ? 'var(--accent)' : 'var(--text-muted)',
+            }}
+          >
+            <Icon size={14} />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'oidc' && <OIDCTab />}
+      {tab === 'apikeys' && <APIKeysTab />}
+    </div>
+  )
+}
+
+// ─── OIDC Tab ─────────────────────────────────────────────────────────────────
+
+function OIDCTab() {
+  const { toast } = useToast()
+  const [cfg, setCfg] = useState<OIDCConfig>({
+    enabled: false, issuerUrl: '', clientId: '', scopes: ['openid', 'profile', 'email'], claimMapping: {},
+  })
+  const [clientSecret, setClientSecret] = useState('')
+  const [showSecret, setShowSecret] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    connectPost('GetOIDCConfig', {})
+      .then(r => r.json())
+      .then(d => {
+        setCfg({
+          enabled: d.enabled ?? false,
+          issuerUrl: d.issuerUrl ?? d.issuer_url ?? '',
+          clientId: d.clientId ?? d.client_id ?? '',
+          scopes: d.scopes ?? ['openid', 'profile', 'email'],
+          claimMapping: d.claimMapping ?? d.claim_mapping ?? {},
+        })
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      const res = await connectPost('UpdateOIDCConfig', {
+        enabled: cfg.enabled,
+        issuerUrl: cfg.issuerUrl,
+        clientId: cfg.clientId,
+        clientSecret: clientSecret || undefined,
+        scopes: cfg.scopes,
+        claimMapping: cfg.claimMapping,
+      })
+      if (!res.ok) throw new Error(await res.text())
+      setClientSecret('')
+      toast('OIDC configuration saved', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (loading) return <Skeleton lines={6} />
+
+  return (
+    <form onSubmit={handleSave} className="max-w-lg space-y-5">
+      <div className="flex items-center justify-between p-4 rounded-lg border"
+        style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}>
+        <div>
+          <p className="text-sm font-medium" style={{ color: 'var(--text)' }}>Enable SSO / OIDC</p>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Allow users to sign in with your identity provider.</p>
+        </div>
+        <Toggle checked={cfg.enabled} onChange={v => setCfg(p => ({ ...p, enabled: v }))} />
+      </div>
+
+      <Field label="Issuer URL" hint="e.g. https://accounts.google.com">
+        <input value={cfg.issuerUrl} onChange={e => setCfg(p => ({ ...p, issuerUrl: e.target.value }))}
+          className="input" placeholder="https://sso.example.com" />
+      </Field>
+
+      <Field label="Client ID">
+        <input value={cfg.clientId} onChange={e => setCfg(p => ({ ...p, clientId: e.target.value }))}
+          className="input" placeholder="your-client-id" />
+      </Field>
+
+      <Field label="Client Secret" hint="Leave blank to keep the existing secret.">
+        <div className="relative">
+          <input
+            type={showSecret ? 'text' : 'password'}
+            value={clientSecret}
+            onChange={e => setClientSecret(e.target.value)}
+            className="input pr-10"
+            placeholder="••••••••"
+            autoComplete="new-password"
+          />
+          <button type="button" onClick={() => setShowSecret(s => !s)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 opacity-60 hover:opacity-100"
+            style={{ color: 'var(--text-muted)' }}>
+            {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
+          </button>
+        </div>
+      </Field>
+
+      <Field label="Scopes" hint="Space-separated list of OIDC scopes.">
+        <input value={cfg.scopes.join(' ')}
+          onChange={e => setCfg(p => ({ ...p, scopes: e.target.value.split(/\s+/).filter(Boolean) }))}
+          className="input" placeholder="openid profile email" />
+      </Field>
+
+      <div>
+        <p className="text-xs mb-1 font-medium" style={{ color: 'var(--text-muted)' }}>
+          Claim → Role mapping
+          <span className="ml-1 font-normal">(maps a claim key to an orkestra role)</span>
+        </p>
+        <ClaimMappingEditor value={cfg.claimMapping} onChange={m => setCfg(p => ({ ...p, claimMapping: m }))} />
+      </div>
+
+      <button type="submit" disabled={busy}
+        className="px-4 py-2 rounded text-sm font-medium disabled:opacity-50"
+        style={{ backgroundColor: 'var(--accent)', color: '#0d1117' }}>
+        {busy ? 'Saving…' : 'Save configuration'}
+      </button>
+    </form>
+  )
+}
+
+function ClaimMappingEditor({ value, onChange }: {
+  value: Record<string, string>
+  onChange: (v: Record<string, string>) => void
+}) {
+  const entries = Object.entries(value)
+  function update(i: number, k: string, v: string) {
+    const next = [...entries]
+    next[i] = [k, v]
+    onChange(Object.fromEntries(next))
+  }
+  function remove(i: number) {
+    const next = entries.filter((_, j) => j !== i)
+    onChange(Object.fromEntries(next))
+  }
+  function add() {
+    onChange({ ...value, '': 'viewer' })
+  }
+  return (
+    <div className="space-y-2">
+      {entries.map(([k, v], i) => (
+        <div key={i} className="flex gap-2 items-center">
+          <input value={k} onChange={e => update(i, e.target.value, v)} className="input flex-1" placeholder="claim key (e.g. groups)" />
+          <span style={{ color: 'var(--text-muted)' }}>→</span>
+          <select value={v} onChange={e => update(i, k, e.target.value)}
+            className="input w-32"
+            style={{ backgroundColor: 'var(--bg)' }}>
+            {['admin', 'operator', 'viewer'].map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+          <button type="button" onClick={() => remove(i)} className="p-1 rounded hover:bg-[var(--surface-2)]" style={{ color: 'var(--text-muted)' }}>
+            <Trash2 size={14} />
+          </button>
+        </div>
+      ))}
+      <button type="button" onClick={add}
+        className="flex items-center gap-1 text-xs px-3 py-1.5 rounded border"
+        style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
+        <Plus size={12} /> Add mapping
+      </button>
+    </div>
+  )
+}
+
+// ─── API Keys Tab ─────────────────────────────────────────────────────────────
+
+function APIKeysTab() {
+  const { toast } = useToast()
+  const [keys, setKeys] = useState<APIKey[]>([])
+  const [loading, setLoading] = useState(true)
+  const [newName, setNewName] = useState('')
+  const [newKey, setNewKey] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  function loadKeys() {
+    connectPost('ListAPIKeys', {})
+      .then(r => r.json())
+      .then(d => setKeys((d.keys ?? []).map((k: Record<string, unknown>) => ({
+        id: String(k.id ?? ''),
+        name: String(k.name ?? ''),
+        createdAt: Number(k.createdAt ?? k.created_at ?? 0),
+        lastUsedAt: Number(k.lastUsedAt ?? k.last_used_at ?? 0),
+        expiresAt: Number(k.expiresAt ?? k.expires_at ?? 0),
+        revoked: Boolean(k.revoked),
+      }))))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(loadKeys, [])
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault()
+    if (!newName.trim()) return
+    setBusy(true)
+    setNewKey(null)
+    try {
+      const res = await connectPost('CreateAPIKey', { name: newName.trim() })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.message ?? 'Failed')
+      setNewKey(d.rawKey ?? d.raw_key ?? '')
+      setNewName('')
+      loadKeys()
+      toast('API key created — copy it now, it won\'t be shown again.', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleRevoke(id: string) {
+    try {
+      await connectPost('RevokeAPIKey', { id })
+      loadKeys()
+      toast('API key revoked', 'success')
+    } catch {
+      toast('Failed to revoke key', 'error')
+    }
+  }
+
+  return (
+    <div className="max-w-lg space-y-6">
+      {/* New key raw value banner */}
+      {newKey && (
+        <div className="p-4 rounded-lg border" style={{ borderColor: 'var(--accent)', backgroundColor: 'rgba(126,226,42,0.06)' }}>
+          <p className="text-xs font-medium mb-2" style={{ color: 'var(--accent)' }}>New API key — copy it now</p>
+          <div className="flex gap-2 items-center">
+            <code className="flex-1 text-xs break-all" style={{ color: 'var(--text)' }}>{newKey}</code>
+            <button onClick={() => { navigator.clipboard.writeText(newKey); toast('Copied!', 'success') }}
+              className="p-1.5 rounded hover:bg-[var(--surface-2)]" style={{ color: 'var(--text-muted)' }}>
+              <Copy size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Create form */}
+      <form onSubmit={handleCreate} className="flex gap-2">
+        <input value={newName} onChange={e => setNewName(e.target.value)}
+          className="input flex-1" placeholder="Key name (e.g. CI/CD pipeline)" />
+        <button type="submit" disabled={busy || !newName.trim()}
+          className="px-3 py-2 rounded text-sm font-medium flex items-center gap-2 disabled:opacity-50"
+          style={{ backgroundColor: 'var(--accent)', color: '#0d1117' }}>
+          <Plus size={14} /> Create
+        </button>
+      </form>
+
+      {/* Keys list */}
+      {loading ? <Skeleton lines={3} /> : (
+        <div className="rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}>
+          {keys.length === 0 ? (
+            <div className="px-4 py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
+              No API keys yet. Create one above.
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  {['Name', 'Created', 'Last used', ''].map(h => (
+                    <th key={h} className="text-left px-4 py-3 text-xs font-medium" style={{ color: 'var(--text-muted)' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {keys.filter(k => !k.revoked).map(k => (
+                  <tr key={k.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td className="px-4 py-3 font-medium" style={{ color: 'var(--text)' }}>{k.name}</td>
+                    <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>
+                      {k.createdAt ? new Date(k.createdAt).toLocaleDateString() : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>
+                      {k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleString() : 'Never'}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button onClick={() => handleRevoke(k.id)}
+                        className="p-1.5 rounded hover:bg-[var(--surface-2)]"
+                        style={{ color: 'var(--text-muted)' }}
+                        title="Revoke key">
+                        <Trash2 size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Shared sub-components ────────────────────────────────────────────────────
+
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-xs mb-1 font-medium" style={{ color: 'var(--text-muted)' }}>{label}</label>
+      {children}
+      {hint && <p className="text-xs mt-1" style={{ color: 'var(--text-muted)', opacity: 0.7 }}>{hint}</p>}
+    </div>
+  )
+}
+
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className="relative w-10 h-6 rounded-full transition-colors"
+      style={{ backgroundColor: checked ? 'var(--accent)' : 'var(--border)' }}
+    >
+      <span
+        className="absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform"
+        style={{ transform: checked ? 'translateX(16px)' : 'translateX(0)' }}
+      />
+    </button>
+  )
+}
+
+function Skeleton({ lines }: { lines: number }) {
+  return (
+    <div className="space-y-3">
+      {Array.from({ length: lines }).map((_, i) => (
+        <div key={i} className="h-9 rounded animate-pulse" style={{ backgroundColor: 'var(--surface-2)' }} />
+      ))}
+    </div>
+  )
+}

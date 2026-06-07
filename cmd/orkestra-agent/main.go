@@ -4,16 +4,19 @@ import (
 	"context"
 	"flag"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/docker/docker/client"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/heckertobias/orkestra/internal/agent/conn"
 	"github.com/heckertobias/orkestra/internal/agent/dockerctl"
 	"github.com/heckertobias/orkestra/internal/agent/enroll"
+	_ "github.com/heckertobias/orkestra/internal/agent/metrics" // register metrics
 	agentreconcile "github.com/heckertobias/orkestra/internal/agent/reconcile"
 	orkestraV1 "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1"
 	"github.com/heckertobias/orkestra/internal/shared/version"
@@ -38,8 +41,9 @@ func main() {
 func runServe(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	var (
-		dataDir  = fs.String("data-dir", envOrDefault("ORKESTRA_AGENT_DATA", "/etc/orkestra/agent"), "Agent data directory")
-		logLevel = fs.String("log-level", envOrDefault("ORKESTRA_LOG_LEVEL", "info"), "Log level")
+		dataDir     = fs.String("data-dir", envOrDefault("ORKESTRA_AGENT_DATA", "/etc/orkestra/agent"), "Agent data directory")
+		logLevel    = fs.String("log-level", envOrDefault("ORKESTRA_LOG_LEVEL", "info"), "Log level")
+		metricsAddr = fs.String("metrics-addr", envOrDefault("ORKESTRA_AGENT_METRICS_ADDR", "0.0.0.0:9091"), "Prometheus metrics listen address")
 	)
 	_ = fs.Parse(args)
 
@@ -85,6 +89,17 @@ func runServe(args []string) {
 		}
 		return nil
 	})
+
+	// Start metrics server.
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", promhttp.Handler())
+	go func() {
+		slog.Info("agent metrics listening", "addr", *metricsAddr)
+		srv := &http.Server{Addr: *metricsAddr, Handler: metricsMux}
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Warn("agent metrics server error", "err", err)
+		}
+	}()
 
 	slog.Info("connecting to master", "master", cfg.MasterAddr, "agent_id", cfg.AgentID)
 	agent.RunForever(ctx)

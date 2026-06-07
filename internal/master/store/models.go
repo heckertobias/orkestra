@@ -4,6 +4,17 @@
 
 package store
 
+type APIKey struct {
+	ID          string  `json:"id"`
+	UserID      string  `json:"user_id"`
+	Name        string  `json:"name"`
+	KeyHash     string  `json:"key_hash"`
+	CreatedAt   int64   `json:"created_at"`
+	LastUsedAt  *int64  `json:"last_used_at"`
+	ExpiresAt   *int64  `json:"expires_at"`
+	Revoked     bool    `json:"revoked"`
+}
+
 type AgentState struct {
 	ServerID  string `json:"server_id"`
 	StateJson []byte `json:"state_json"`

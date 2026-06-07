@@ -14,6 +14,11 @@ import (
 	orkestraV1 "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1"
 )
 
+// EventEmitter allows other packages to emit events via the StackService.
+type EventEmitter interface {
+	EmitEvent(ctx context.Context, p store.InsertEventParams)
+}
+
 // StackServiceHandler implements the UI-facing StackService RPC handlers.
 type StackServiceHandler struct {
 	db           *pgxpool.Pool
@@ -119,6 +124,81 @@ func (h *StackServiceHandler) StreamStats(_ context.Context, req *connect.Reques
 	return connect.NewError(connect.CodeUnimplemented, fmt.Errorf("stream bridging implemented in M2 integration"))
 }
 
-func (h *StackServiceHandler) StreamEvents(_ context.Context, req *connect.Request[orkestraV1.StreamEventsRequest], stream *connect.ServerStream[orkestraV1.Event]) error {
-	return connect.NewError(connect.CodeUnimplemented, fmt.Errorf("stream bridging implemented in M6"))
+// StreamEvents polls the events table and streams new events to the client.
+// It sends the last 20 events on connect, then polls for new events every 2 seconds.
+func (h *StackServiceHandler) StreamEvents(ctx context.Context, req *connect.Request[orkestraV1.StreamEventsRequest], stream *connect.ServerStream[orkestraV1.Event]) error {
+	filter := store.ListEventsFilteredParams{
+		ServerID: ptrStringIfNonEmpty(req.Msg.ServerId),
+		StackID:  ptrStringIfNonEmpty(req.Msg.StackId),
+	}
+
+	// Send recent history first.
+	rows, err := h.q.ListEventsFiltered(ctx, filter)
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("list events: %w", err))
+	}
+	var lastID int64
+	for i := len(rows) - 1; i >= 0; i-- {
+		ev := rows[i]
+		if err := stream.Send(eventToProto(ev)); err != nil {
+			return err
+		}
+		if ev.ID > lastID {
+			lastID = ev.ID
+		}
+	}
+
+	// Poll for new events.
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			newRows, err := h.q.ListEventsAfter(ctx, store.ListEventsAfterParams{
+				ID:       lastID,
+				ServerID: filter.ServerID,
+				StackID:  filter.StackID,
+			})
+			if err != nil {
+				continue
+			}
+			for _, ev := range newRows {
+				if err := stream.Send(eventToProto(ev)); err != nil {
+					return err
+				}
+				if ev.ID > lastID {
+					lastID = ev.ID
+				}
+			}
+		}
+	}
+}
+
+func ptrStringIfNonEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func eventToProto(e store.Event) *orkestraV1.Event {
+	ev := &orkestraV1.Event{
+		Id:        e.ID,
+		Ts:        e.Ts,
+		EventType: e.EventType,
+		Severity:  e.Severity,
+		Message:   e.Message,
+	}
+	if e.ServerID != nil {
+		ev.ServerId = *e.ServerID
+	}
+	if e.StackID != nil {
+		ev.StackId = *e.StackID
+	}
+	if e.DetailJson != nil {
+		ev.DetailJson = string(e.DetailJson)
+	}
+	return ev
 }

@@ -132,18 +132,18 @@
 
 **Goal:** Production-ready features and UX polish.
 
-- [ ] OIDC provider integration (`coreos/go-oidc`), claim→role mapping, `oidc_config` table
-- [ ] **Web UI — OIDC configuration tab** + SSO login button
-- [ ] Prometheus metrics (Master + Agent) as described in [08-deployment.md](08-deployment.md)
-- [ ] `/healthz` + `/readyz` endpoints
-- [ ] `events` table + live `StreamEvents` feed in UI (Dashboard event panel)
-- [ ] **Web UI — Dashboard** (fleet stats, event feed)
+- [x] OIDC provider integration (`coreos/go-oidc`), claim→role mapping, `oidc_config` table
+- [x] **Web UI — OIDC configuration tab** + SSO login button
+- [x] Prometheus metrics (Master + Agent) as described in [08-deployment.md](08-deployment.md)
+- [x] `/healthz` + `/readyz` endpoints
+- [x] `events` table + live `StreamEvents` feed in UI (Dashboard event panel)
+- [x] **Web UI — Dashboard** (fleet stats + live event feed + loading skeletons)
 - [ ] Compose field matrix extended (scale/replicas, additional fields from user feedback)
-- [ ] Rate limiting on auth endpoints
-- [ ] API key auth (for non-browser clients / CI scripts)
-- [ ] UI polish: error states, loading skeletons, empty states, toasts for async actions
+- [x] Rate limiting on auth endpoints (per-IP, golang.org/x/time/rate)
+- [x] API key auth (Bearer token, for non-browser clients / CI scripts)
+- [x] UI polish: loading skeletons, empty states, toasts for async actions
 
-**Result:** SSO works; Prometheus scrapes cleanly; Dashboard shows live event feed.
+**Result:** ✅ SSO works; Prometheus scrapes on :9090 (Master) / :9091 (Agent); Dashboard shows live event feed; API keys for CI; rate limiting on Login/Setup.
 
 ---
 
