@@ -9,12 +9,6 @@ centrally manages self-healing Compose stacks across Linux servers (a simpler al
 Kubernetes/Nomad). The `docs/` directory holds the authoritative design; `docs/00-overview.md`
 and `docs/01-repo-layout.md` are the best entry points.
 
-**Project status:** early development (Milestone 0 — scaffold). Most `internal/` packages
-described in `docs/01-repo-layout.md` (agentgw, reconciler, pki, auth, agent/*, web/) are
-*planned but not yet implemented*. Only `internal/master/store` and `internal/shared/version`
-exist today. Treat the docs as the target design, not the current state. `docs/09-roadmap.md`
-tracks milestones.
-
 ## Common commands
 
 ```bash
@@ -76,18 +70,16 @@ browser SPA (`stacks.proto`, `secrets.proto`, `auth.proto`). No gRPC-web proxy n
 **Desired State & reconciliation** (`docs/04-reconciliation.md`): a server's desired state is the
 union of its `assignments`, each binding a `stack_version` (compose YAML + env + secret refs) to a
 `desired_status` (running/stopped/removed). The Master pushes the *full* desired state per server
-(not diffs) so reconnects are safe. The Agent's Converge Engine (`internal/agent/compose`,
-planned) re-implements `docker compose up/down/recreate` on top of `compose-go` (which only
-parses, no orchestration) — this is the highest-complexity package; container identity and
-recreate decisions hinge on an `orkestra.spec-hash` label. Only a documented subset of Compose
-fields is supported; unsupported fields fail loudly.
+(not diffs) so reconnects are safe. The Agent's Converge Engine (`internal/agent/compose`)
+re-implements `docker compose up/down/recreate` on top of `compose-go` (which only parses, no
+orchestration) — container identity and recreate decisions hinge on an `orkestra.spec-hash` label.
+Only a documented subset of Compose fields is supported; unsupported fields fail loudly.
 
 **Streaming:** the Master bridges browser server-streams (logs/stats/events) to Agent streams via
 a per-agent stream mux keyed by `stream_id`, with backpressure propagated to the Agent.
 
-**Web UI:** React/TS/Vite SPA in `web/` (planned), built to `web/dist/` and embedded into the
-Master binary via `go:embed`. The `dev` build tag swaps the embed for a proxy to the Vite dev
-server.
+**Web UI:** React/TS/Vite SPA in `web/`, built to `web/dist/` and embedded into the Master binary
+via `go:embed`. The `dev` build tag swaps the embed for a proxy to the Vite dev server.
 
 ## Conventions & gotchas
 
