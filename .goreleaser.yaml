@@ -5,13 +5,17 @@ project_name: orkestra
 before:
   hooks:
     - go mod tidy
-    - buf generate
-    - sqlc generate
+    - make proto
+    - make sqlc
+    - npm --prefix web ci
+    - npm --prefix web run build
 
 builds:
-  - id: master
+  - id: orkestra-master
     binary: orkestra-master
     main: ./cmd/orkestra-master
+    env:
+      - CGO_ENABLED=0
     goos: [linux]
     goarch: [amd64, arm64]
     ldflags:
@@ -20,9 +24,11 @@ builds:
       - -X github.com/heckertobias/orkestra/internal/shared/version.Commit={{.Commit}}
       - -X github.com/heckertobias/orkestra/internal/shared/version.BuildDate={{.Date}}
 
-  - id: agent
+  - id: orkestra-agent
     binary: orkestra-agent
     main: ./cmd/orkestra-agent
+    env:
+      - CGO_ENABLED=0
     goos: [linux]
     goarch: [amd64, arm64]
     ldflags:
@@ -33,41 +39,84 @@ builds:
 
 archives:
   - id: master-archive
-    builds: [master]
+    ids: [orkestra-master]
     name_template: "orkestra-master_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format: tar.gz
     files:
       - deploy/systemd/orkestra-master.service
-      - deploy/docker/**
+      - deploy/docker/compose.yaml
+      - deploy/docker/Dockerfile.master
+      - CHANGELOG.md
 
   - id: agent-archive
-    builds: [agent]
+    ids: [orkestra-agent]
     name_template: "orkestra-agent_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format: tar.gz
     files:
       - deploy/systemd/orkestra-agent.service
       - deploy/install-agent.sh
+      - CHANGELOG.md
 
 dockers:
   - id: master-amd64
-    ids: [master]
+    ids: [orkestra-master]
+    goos: linux
+    goarch: amd64
     image_templates:
       - "ghcr.io/heckertobias/orkestra-master:{{ .Version }}-amd64"
       - "ghcr.io/heckertobias/orkestra-master:latest-amd64"
     dockerfile: deploy/docker/Dockerfile.master
-    goarch: amd64
     build_flag_templates:
       - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-      - "--label=org.opencontainers.image.revision={{.Commit}}"
+      - "--label=org.opencontainers.image.title=orkestra-master"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .Commit }}"
+      - "--label=org.opencontainers.image.source=https://github.com/heckertobias/orkestra"
 
   - id: master-arm64
-    ids: [master]
+    ids: [orkestra-master]
+    goos: linux
+    goarch: arm64
     image_templates:
       - "ghcr.io/heckertobias/orkestra-master:{{ .Version }}-arm64"
       - "ghcr.io/heckertobias/orkestra-master:latest-arm64"
     dockerfile: deploy/docker/Dockerfile.master
-    goarch: arm64
     build_flag_templates:
       - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.title=orkestra-master"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .Commit }}"
+      - "--label=org.opencontainers.image.source=https://github.com/heckertobias/orkestra"
+
+  - id: agent-amd64
+    ids: [orkestra-agent]
+    goos: linux
+    goarch: amd64
+    image_templates:
+      - "ghcr.io/heckertobias/orkestra-agent:{{ .Version }}-amd64"
+      - "ghcr.io/heckertobias/orkestra-agent:latest-amd64"
+    dockerfile: deploy/docker/Dockerfile.agent
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title=orkestra-agent"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .Commit }}"
+      - "--label=org.opencontainers.image.source=https://github.com/heckertobias/orkestra"
+
+  - id: agent-arm64
+    ids: [orkestra-agent]
+    goos: linux
+    goarch: arm64
+    image_templates:
+      - "ghcr.io/heckertobias/orkestra-agent:{{ .Version }}-arm64"
+      - "ghcr.io/heckertobias/orkestra-agent:latest-arm64"
+    dockerfile: deploy/docker/Dockerfile.agent
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.title=orkestra-agent"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .Commit }}"
+      - "--label=org.opencontainers.image.source=https://github.com/heckertobias/orkestra"
 
 docker_manifests:
   - name_template: "ghcr.io/heckertobias/orkestra-master:{{ .Version }}"
@@ -78,14 +127,35 @@ docker_manifests:
     image_templates:
       - "ghcr.io/heckertobias/orkestra-master:latest-amd64"
       - "ghcr.io/heckertobias/orkestra-master:latest-arm64"
+  - name_template: "ghcr.io/heckertobias/orkestra-agent:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/heckertobias/orkestra-agent:{{ .Version }}-amd64"
+      - "ghcr.io/heckertobias/orkestra-agent:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/heckertobias/orkestra-agent:latest"
+    image_templates:
+      - "ghcr.io/heckertobias/orkestra-agent:latest-amd64"
+      - "ghcr.io/heckertobias/orkestra-agent:latest-arm64"
 
 checksum:
   name_template: "checksums.txt"
 
 changelog:
+  use: github
   sort: asc
   filters:
     exclude:
       - "^docs:"
       - "^test:"
-      - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: heckertobias
+    name: orkestra
+  name_template: "v{{ .Version }}"
+  header: |
+    ## orkestra {{ .Tag }}
+
+    See [CHANGELOG.md](CHANGELOG.md) for details.

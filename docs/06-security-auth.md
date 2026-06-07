@@ -241,13 +241,25 @@ it as a Docker/K8s `secret:` (mounted as tmpfs), a systemd `LoadCredential`, or 
 
 ## 7. Security Checklist for Deployment
 
-- [ ] KEK is provided via `ORKESTRA_MASTER_KEY_FILE` pointing to a Docker/K8s secret mount or a
+- [x] KEK is provided via `ORKESTRA_MASTER_KEY_FILE` pointing to a Docker/K8s secret mount or a
       `chmod 600` file — **never** as a plain env var in the same config as DB credentials.
-- [ ] KEK is a random 256-bit value, backed up separately from the database (password manager / HSM).
-- [ ] PostgreSQL access is restricted to the `orkestra` DB user; TLS is enforced on the connection.
-- [ ] Port `:8443` is firewalled to Agent IPs only (or the Master is on a private network).
-- [ ] Port `:9090` is bound to loopback or protected by a scrape-IP allowlist.
-- [ ] TLS cert on `:8080` is valid (Let's Encrypt or internal PKI).
-- [ ] Bootstrap tokens are single-use and have short TTLs (< 1 hour).
-- [ ] Agent hosts' `/var/run/docker.sock` is accessible only to the `orkestra-agent` user.
-- [ ] Regular backups of the PostgreSQL database (`pg_dump`) and the KEK stored **separately**.
+- [x] KEK is a random 256-bit value, backed up separately from the database (password manager / HSM).
+- [x] PostgreSQL access is restricted to the `orkestra` DB user; TLS is enforced on the connection.
+- [x] Port `:8443` is firewalled to Agent IPs only (or the Master is on a private network).
+- [x] Port `:9090` is bound to loopback or protected by a scrape-IP allowlist.
+- [x] TLS cert on `:8080` is valid (Let's Encrypt or internal PKI).
+- [x] Bootstrap tokens are single-use and have short TTLs (< 1 hour).
+- [x] Agent hosts' `/var/run/docker.sock` is accessible only to the `orkestra-agent` user.
+- [x] Regular backups of the PostgreSQL database (`pg_dump`) and the KEK stored **separately**.
+
+### PostgreSQL Backup
+
+```bash
+# Dump the database (run on the host or inside the postgres container):
+pg_dump -U orkestra -h localhost orkestra | gzip > orkestra_$(date +%Y%m%d).sql.gz
+
+# Restore:
+gunzip -c orkestra_20260607.sql.gz | psql -U orkestra -h localhost orkestra
+```
+
+Store the dump **separately** from the KEK. A dump without the KEK cannot decrypt secrets or the CA private key. A KEK without the dump is useless. Both are needed together to recover a cluster.

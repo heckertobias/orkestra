@@ -120,11 +120,19 @@ func main() {
 	registry := agentgw.NewRegistry()
 	gwHandler := agentgw.NewHandler(db, ca, registry, emitFn)
 
+	revocationChecker := agentgw.RevocationChecker(func(rCtx context.Context, fingerprint string) (bool, error) {
+		cert, err := q.GetCertificateByFingerprint(rCtx, fingerprint)
+		if err != nil {
+			return false, nil // treat lookup errors as non-revoked to avoid bricking agents on DB hiccup
+		}
+		return cert.Revoked, nil
+	})
+
 	agentMux := http.NewServeMux()
 	agentPath, agentSvcHandler := orkestrav1connect.NewAgentServiceHandler(gwHandler,
 		connect.WithCompressMinBytes(1024),
 	)
-	agentMux.Handle(agentPath, agentgw.MTLSMiddleware(agentSvcHandler))
+	agentMux.Handle(agentPath, agentgw.MTLSMiddleware(revocationChecker, agentSvcHandler))
 
 	caCert := ca.TLSCert()
 	agentTLSCfg := agentgw.NewAgentTLSConfig(caCert, ca.CertPool())

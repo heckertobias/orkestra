@@ -1,0 +1,10 @@
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY orkestra-agent /usr/local/bin/orkestra-agent
+
+EXPOSE 9091
+
+VOLUME ["/var/lib/orkestra"]
+
+ENTRYPOINT ["/usr/local/bin/orkestra-agent"]
+CMD ["serve"]

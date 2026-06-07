@@ -3,8 +3,13 @@ package conn
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
 	"log/slog"
 	"math"
@@ -20,6 +25,8 @@ import (
 	orkestraV1 "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1"
 	"github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1/orkestrav1connect"
 )
+
+const renewThreshold = 30 * 24 * time.Hour
 
 // MessageHandler processes a MasterMessage received from the Master.
 type MessageHandler func(ctx context.Context, msg *orkestraV1.MasterMessage) error
@@ -43,6 +50,9 @@ func (a *Agent) RunForever(ctx context.Context) {
 	for {
 		if err := ctx.Err(); err != nil {
 			return
+		}
+		if err := a.checkAndRenewCert(ctx); err != nil {
+			slog.Warn("cert renewal check failed", "err", err)
 		}
 		if err := a.connect(ctx); err != nil {
 			if ctx.Err() != nil {
@@ -140,6 +150,71 @@ func (a *Agent) connect(ctx context.Context) error {
 	}
 
 	return stream.CloseResponse()
+}
+
+// checkAndRenewCert renews the agent's mTLS cert if it expires within renewThreshold.
+func (a *Agent) checkAndRenewCert(ctx context.Context) error {
+	certBytes, err := os.ReadFile(enroll.CertPath(a.dataDir))
+	if err != nil {
+		return fmt.Errorf("read cert: %w", err)
+	}
+	block, _ := pem.Decode(certBytes)
+	if block == nil {
+		return fmt.Errorf("decode cert PEM")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return fmt.Errorf("parse cert: %w", err)
+	}
+	if time.Until(cert.NotAfter) > renewThreshold {
+		return nil
+	}
+
+	slog.Info("agent cert expiring soon, renewing", "expires_at", cert.NotAfter)
+
+	privKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		return fmt.Errorf("generate renewal keypair: %w", err)
+	}
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		Subject: pkix.Name{CommonName: a.cfg.AgentID},
+	}, privKey)
+	if err != nil {
+		return fmt.Errorf("create renewal CSR: %w", err)
+	}
+	csrPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER}))
+
+	tlsCfg, err := a.mtlsConfig()
+	if err != nil {
+		return fmt.Errorf("build mTLS config for renewal: %w", err)
+	}
+	httpClient := &http.Client{Transport: &http.Transport{TLSClientConfig: tlsCfg, ForceAttemptHTTP2: true}}
+	client := orkestrav1connect.NewAgentServiceClient(httpClient, a.cfg.MasterAddr, connect.WithGRPC())
+
+	resp, err := client.RenewCert(ctx, connect.NewRequest(&orkestraV1.RenewCertRequest{CsrPem: csrPEM}))
+	if err != nil {
+		return fmt.Errorf("RenewCert RPC: %w", err)
+	}
+
+	keyDER, err := x509.MarshalECPrivateKey(privKey)
+	if err != nil {
+		return fmt.Errorf("marshal renewal key: %w", err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+
+	if err := os.WriteFile(enroll.CertPath(a.dataDir), []byte(resp.Msg.ClientCertPem), 0o644); err != nil {
+		return fmt.Errorf("save renewed cert: %w", err)
+	}
+	if err := os.WriteFile(enroll.KeyPath(a.dataDir), keyPEM, 0o600); err != nil {
+		return fmt.Errorf("save renewal key: %w", err)
+	}
+	if resp.Msg.CaBundlePem != "" {
+		if err := os.WriteFile(enroll.CAPath(a.dataDir), []byte(resp.Msg.CaBundlePem), 0o644); err != nil {
+			return fmt.Errorf("save renewed CA bundle: %w", err)
+		}
+	}
+	slog.Info("agent cert renewed successfully")
+	return nil
 }
 
 func (a *Agent) mtlsConfig() (*tls.Config, error) {

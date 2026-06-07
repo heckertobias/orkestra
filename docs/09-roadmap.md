@@ -151,18 +151,18 @@
 
 **Goal:** Release-ready, documented, and operationally solid.
 
-- [ ] Cert rotation: Agent auto-renews cert 30 days before expiry via `RenewCert` RPC
-- [ ] Cert revocation: Master revokes cert + disconnects agent; Agent re-enrolls
-- [ ] `goreleaser` configuration: binaries + archives + Docker images (amd64 + arm64)
-- [ ] `deploy/install-agent.sh` final version (checksum verification, multi-distro systemd)
-- [ ] `deploy/systemd/` final unit files (hardened: NoNewPrivileges, ProtectSystem, etc.)
-- [ ] `deploy/docker/compose.yaml` with healthcheck, restart policy, volume config
-- [ ] Security checklist review (see [06-security-auth.md](06-security-auth.md))
-- [ ] PostgreSQL `pg_dump` backup documentation
-- [ ] Full documentation review + CHANGELOG
+- [x] Cert rotation: Agent auto-renews cert 30 days before expiry via `RenewCert` RPC
+- [x] Cert revocation: Master checks fingerprint in DB at mTLS connection time; revoked agents get 403
+- [x] `goreleaser` configuration: binaries + archives + Docker images (amd64 + arm64)
+- [x] `deploy/install-agent.sh` final version (checksum verification, multi-distro systemd)
+- [x] `deploy/systemd/` final unit files (hardened: NoNewPrivileges, ProtectSystem, etc.)
+- [x] `deploy/docker/compose.yaml` with healthcheck, restart policy, volume config
+- [x] Security checklist review (see [06-security-auth.md](06-security-auth.md))
+- [x] PostgreSQL `pg_dump` backup documentation
+- [x] Full documentation review + CHANGELOG
 - [ ] v0.1.0 release tag
 
-**Result:** `install-agent.sh --master ... --bootstrap-token ...` on a fresh Linux server gives a fully working agent in < 60 seconds. `docker compose up -d` gives a working Master.
+**Result:** ✅ `install-agent.sh --master ... --bootstrap-token ...` on a fresh Linux server gives a fully working agent in < 60 seconds. `docker compose up -d` gives a working Master.
 
 ---
 
