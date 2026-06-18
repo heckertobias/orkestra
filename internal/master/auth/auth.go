@@ -75,14 +75,10 @@ func HashPassword(password string) (string, error) {
 // VerifyPassword checks a password against a PHC-format argon2id hash.
 func VerifyPassword(encodedHash, password string) bool {
 	var m, t, p uint32
-	var b64Salt, b64Hash string
-	_, err := fmt.Sscanf(encodedHash,
-		"$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s",
-		&m, &t, &p, &b64Salt, &b64Hash)
+	_, err := fmt.Sscanf(encodedHash, "$argon2id$v=19$m=%d,t=%d,p=%d", &m, &t, &p)
 	if err != nil {
 		return false
 	}
-	// Sscanf with %s stops at whitespace; but base64 might contain '+'. Use manual split.
 	return verifyArgon2id(encodedHash, password, m, t, p)
 }
 
