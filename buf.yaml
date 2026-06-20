@@ -5,7 +5,10 @@ lint:
   use:
     - STANDARD
   except:
-    - PACKAGE_VERSION_SUFFIX  # we use v1 in path but package name is orkestra.v1 — acceptable
+    - PACKAGE_VERSION_SUFFIX       # package name orkestra.v1 — acceptable
+    - RPC_REQUEST_RESPONSE_UNIQUE  # shared message types (Empty, User, etc.) reused across RPCs by design
+    - RPC_REQUEST_STANDARD_NAME    # intentionally reuse existing messages as request types
+    - RPC_RESPONSE_STANDARD_NAME   # intentionally reuse existing messages as response types
 breaking:
   use:
     - FILE
