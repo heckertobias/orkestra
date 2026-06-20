@@ -15,7 +15,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version-file: "go.mod"
 
       - name: Set up buf
         uses: bufbuild/buf-setup-action@v1
@@ -47,7 +47,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version-file: "go.mod"
 
       - name: Set up buf
         uses: bufbuild/buf-setup-action@v1
@@ -59,7 +59,7 @@ jobs:
         run: make proto && make sqlc
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
           version: latest
 
@@ -83,7 +83,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version-file: "go.mod"
 
       - name: Set up buf
         uses: bufbuild/buf-setup-action@v1
