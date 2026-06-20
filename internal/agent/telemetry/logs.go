@@ -43,7 +43,7 @@ func (ls *LogStreamer) Stream(ctx context.Context, streamID, containerID string,
 	if err != nil {
 		return err
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	// Docker multiplexes stdout/stderr with an 8-byte header: [stream_type(1), 0,0,0, size(4)]
 	hdr := make([]byte, 8)

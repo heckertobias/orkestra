@@ -16,7 +16,7 @@ func loadFromBytes(data []byte, projectName string, env map[string]string) (*com
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 
 	composeFile := filepath.Join(tmp, "compose.yaml")
 	if err := os.WriteFile(composeFile, data, 0o600); err != nil {

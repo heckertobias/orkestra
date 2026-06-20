@@ -17,11 +17,10 @@ jobs:
         with:
           go-version-file: "go.mod"
 
-      - name: Set up buf
-        uses: bufbuild/buf-setup-action@v1
-
-      - name: Install sqlc
-        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+      - name: Install tools
+        run: |
+          go install github.com/bufbuild/buf/cmd/buf@latest
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
 
       - name: Generate protobuf
         run: make proto
@@ -49,19 +48,17 @@ jobs:
         with:
           go-version-file: "go.mod"
 
-      - name: Set up buf
-        uses: bufbuild/buf-setup-action@v1
-
-      - name: Install sqlc
-        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+      - name: Install tools
+        run: |
+          go install github.com/bufbuild/buf/cmd/buf@latest
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
       - name: Generate (required before lint)
         run: make proto && make sqlc
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
-        with:
-          version: latest
+        run: golangci-lint run ./...
 
       - name: buf lint
         run: buf lint
@@ -85,11 +82,10 @@ jobs:
         with:
           go-version-file: "go.mod"
 
-      - name: Set up buf
-        uses: bufbuild/buf-setup-action@v1
-
-      - name: Install sqlc
-        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+      - name: Install tools
+        run: |
+          go install github.com/bufbuild/buf/cmd/buf@latest
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
 
       - name: Generate
         run: make proto && make sqlc

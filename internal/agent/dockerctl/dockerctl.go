@@ -99,7 +99,7 @@ func (c *Client) PullImage(ctx context.Context, ref string, w io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("image pull: %w", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	_, err = io.Copy(w, reader)
 	return err
 }
