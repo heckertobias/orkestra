@@ -246,13 +246,6 @@ func (h *StackServiceHandler) StreamEvents(ctx context.Context, req *connect.Req
 	}
 }
 
-func ptrStringIfNonEmpty(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
 func eventToProto(e store.Event) *orkestraV1.Event {
 	ev := &orkestraV1.Event{
 		Id:        e.ID,

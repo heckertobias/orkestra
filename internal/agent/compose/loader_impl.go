@@ -32,6 +32,7 @@ func loadFromBytes(data []byte, projectName string, env map[string]string) (*com
 	opts, err := cli.NewProjectOptions(
 		[]string{composeFile},
 		cli.WithName(projectName),
+		cli.WithEnv(environ),
 		cli.WithOsEnv,
 		cli.WithDotEnv,
 		cli.WithConfigFileEnv,

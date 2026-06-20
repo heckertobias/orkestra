@@ -15,8 +15,6 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 
 	"github.com/heckertobias/orkestra/internal/master/agentgw"
 	masterapi "github.com/heckertobias/orkestra/internal/master/api"
@@ -223,10 +221,14 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 
+	var uiProtos http.Protocols
+	uiProtos.SetHTTP1(true)
+	uiProtos.SetHTTP2(true)
 	uiServer := &http.Server{
 		Addr:        *uiAddr,
-		Handler:     h2c.NewHandler(sessionMW(uiMux), &http2.Server{}),
+		Handler:     sessionMW(uiMux),
 		BaseContext: func(_ net.Listener) context.Context { return ctx },
+		Protocols:   &uiProtos,
 	}
 
 	go func() {

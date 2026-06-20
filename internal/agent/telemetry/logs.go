@@ -2,7 +2,6 @@
 package telemetry
 
 import (
-	"bufio"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -166,16 +165,3 @@ func (ss *StatsStreamer) collectStats(ctx context.Context, containerIDs []string
 	return out, nil
 }
 
-// Placeholder line reader for log streaming without Docker mux header (TTY mode).
-func scanLines(rc io.Reader, streamID string, send func(*orkestraV1.LogChunk) error) error {
-	scanner := bufio.NewScanner(rc)
-	for scanner.Scan() {
-		if err := send(&orkestraV1.LogChunk{
-			StreamId: streamID,
-			Data:     append(scanner.Bytes(), '\n'),
-		}); err != nil {
-			return err
-		}
-	}
-	return scanner.Err()
-}

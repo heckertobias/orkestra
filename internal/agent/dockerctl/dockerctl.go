@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	dockerevents "github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
@@ -68,7 +67,7 @@ func (c *Client) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
 }
 
 // InspectContainer returns detailed info for a single container.
-func (c *Client) InspectContainer(ctx context.Context, id string) (types.ContainerJSON, error) {
+func (c *Client) InspectContainer(ctx context.Context, id string) (container.InspectResponse, error) {
 	return c.dc.ContainerInspect(ctx, id)
 }
 
