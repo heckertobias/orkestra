@@ -316,6 +316,10 @@ func (h *AuthServiceHandler) DeleteUser(ctx context.Context, req *connect.Reques
 	if err := requireRole(ctx, "admin"); err != nil {
 		return nil, err
 	}
+	actor := masterauth.UserFromContext(ctx)
+	if actor != nil && req.Msg.Id == actor.ID {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("cannot delete your own account"))
+	}
 	if _, err := h.q.UpdateUser(ctx, store.UpdateUserParams{
 		ID:       req.Msg.Id,
 		Disabled: true,
