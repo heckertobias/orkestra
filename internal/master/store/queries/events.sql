@@ -7,6 +7,13 @@ SELECT * FROM events ORDER BY ts DESC LIMIT $1;
 
 -- name: ListEventsFiltered :many
 SELECT * FROM events
-WHERE ($1::text IS NULL OR server_id = $1)
-  AND ($2::text IS NULL OR stack_id = $2)
+WHERE (@server_id::text IS NULL OR server_id = @server_id)
+  AND (@stack_id::text IS NULL OR stack_id = @stack_id)
 ORDER BY ts DESC LIMIT 100;
+
+-- name: ListEventsAfter :many
+SELECT * FROM events
+WHERE id > @after_id
+  AND (@server_id::text IS NULL OR server_id = @server_id)
+  AND (@stack_id::text IS NULL OR stack_id = @stack_id)
+ORDER BY id ASC;

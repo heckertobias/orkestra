@@ -38,6 +38,16 @@ func NewAuthServiceHandler(db *pgxpool.Pool, kek []byte, setupToken *string) *Au
 
 // AuditLogHTTPHandler returns audit log entries as JSON (GET /api/audit).
 func (h *AuthServiceHandler) AuditLogHTTPHandler(w http.ResponseWriter, r *http.Request) {
+	// SessionMiddleware runs before this handler and injects the user into context.
+	u := masterauth.UserFromContext(r.Context())
+	if u == nil {
+		http.Error(w, "not authenticated", http.StatusUnauthorized)
+		return
+	}
+	if !masterauth.IsAdmin(u) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
 	entries, err := h.q.ListAuditLog(r.Context(), 200)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -193,9 +203,10 @@ func (h *AuthServiceHandler) Login(ctx context.Context, req *connect.Request[ork
 	_ = h.q.SetLastLogin(ctx, store.SetLastLoginParams{ID: user.ID, LastLoginAt: &nowMs})
 
 	roles, _ := h.q.GetUserRoles(ctx, user.ID)
+	bindings := h.loadUserBindings(ctx, user.ID)
 
 	resp := connect.NewResponse(&orkestraV1.LoginResponse{
-		User:      userToProto(user, roles),
+		User:      userToProto(user, roles, bindings),
 		SessionId: sessionID,
 	})
 	masterauth.SetSessionCookie(resp.Header(), rawToken, expires)
@@ -231,11 +242,15 @@ func (h *AuthServiceHandler) GetCurrentUser(ctx context.Context, _ *connect.Requ
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
 	}
 	roles, _ := h.q.GetUserRoles(ctx, user.ID)
-	return connect.NewResponse(userToProto(user, roles)), nil
+	bindings := h.loadUserBindings(ctx, user.ID)
+	return connect.NewResponse(userToProto(user, roles, bindings)), nil
 }
 
-// ListUsers returns all users.
+// ListUsers returns all users (admin only).
 func (h *AuthServiceHandler) ListUsers(ctx context.Context, _ *connect.Request[orkestraV1.ListUsersRequest]) (*connect.Response[orkestraV1.ListUsersResponse], error) {
+	if err := requireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
 	rows, err := h.q.ListUsers(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list users: %w", err))
@@ -243,7 +258,8 @@ func (h *AuthServiceHandler) ListUsers(ctx context.Context, _ *connect.Request[o
 	users := make([]*orkestraV1.User, 0, len(rows))
 	for _, row := range rows {
 		roles, _ := h.q.GetUserRoles(ctx, row.ID)
-		users = append(users, userToProto(row, roles))
+		bindings := h.loadUserBindings(ctx, row.ID)
+		users = append(users, userToProto(row, roles, bindings))
 	}
 	return connect.NewResponse(&orkestraV1.ListUsersResponse{Users: users}), nil
 }
@@ -274,7 +290,7 @@ func (h *AuthServiceHandler) CreateUser(ctx context.Context, req *connect.Reques
 	}
 	actor := masterauth.UserFromContext(ctx)
 	h.auditAuth(ctx, nil, "user.create", ptrString(fmt.Sprintf("actor=%s target=%s", actor.Username, row.Username)))
-	return connect.NewResponse(userToProto(row, nil)), nil
+	return connect.NewResponse(userToProto(row, nil, nil)), nil
 }
 
 // UpdateUser updates display_name and disabled flag (admin only).
@@ -291,7 +307,8 @@ func (h *AuthServiceHandler) UpdateUser(ctx context.Context, req *connect.Reques
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update user: %w", err))
 	}
 	roles, _ := h.q.GetUserRoles(ctx, row.ID)
-	return connect.NewResponse(userToProto(row, roles)), nil
+	bindings := h.loadUserBindings(ctx, row.ID)
+	return connect.NewResponse(userToProto(row, roles, bindings)), nil
 }
 
 // DeleteUser disables a user (soft delete via disabled flag) — admin only.
@@ -326,8 +343,11 @@ func (h *AuthServiceHandler) ResetPassword(ctx context.Context, req *connect.Req
 	return connect.NewResponse(&orkestraV1.AuthEmpty{}), nil
 }
 
-// ListRoleBindings returns role bindings, filtered by user_id if provided.
+// ListRoleBindings returns role bindings, filtered by user_id if provided (admin only).
 func (h *AuthServiceHandler) ListRoleBindings(ctx context.Context, req *connect.Request[orkestraV1.ListRoleBindingsRequest]) (*connect.Response[orkestraV1.ListRoleBindingsResponse], error) {
+	if err := requireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
 	var rows []store.RoleBinding
 	var err error
 	if req.Msg.UserId != "" {
@@ -524,8 +544,11 @@ func (h *AuthServiceHandler) RevokeAPIKey(ctx context.Context, req *connect.Requ
 	return connect.NewResponse(&orkestraV1.AuthEmpty{}), nil
 }
 
-// ListEnrollmentTokens lists all enrollment tokens.
+// ListEnrollmentTokens lists all enrollment tokens (admin only).
 func (h *AuthServiceHandler) ListEnrollmentTokens(ctx context.Context, _ *connect.Request[orkestraV1.AuthEmpty]) (*connect.Response[orkestraV1.ListEnrollmentTokensResponse], error) {
+	if err := requireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
 	rows, err := h.q.ListEnrollmentTokens(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list tokens: %w", err))
@@ -537,17 +560,17 @@ func (h *AuthServiceHandler) ListEnrollmentTokens(ctx context.Context, _ *connec
 	return connect.NewResponse(&orkestraV1.ListEnrollmentTokensResponse{Tokens: tokens}), nil
 }
 
-// CreateEnrollmentToken creates a new enrollment token (delegates to pki token logic).
+// CreateEnrollmentToken creates a new enrollment token (admin only).
 func (h *AuthServiceHandler) CreateEnrollmentToken(ctx context.Context, req *connect.Request[orkestraV1.CreateEnrollmentTokenRequest]) (*connect.Response[orkestraV1.EnrollmentToken], error) {
-	if err := requireRole(ctx, "admin", "operator"); err != nil {
+	if err := requireRole(ctx, "admin"); err != nil {
 		return nil, err
 	}
 	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("use the existing enroll endpoint for token creation"))
 }
 
-// RevokeEnrollmentToken revokes an enrollment token.
+// RevokeEnrollmentToken revokes an enrollment token (admin only).
 func (h *AuthServiceHandler) RevokeEnrollmentToken(ctx context.Context, req *connect.Request[orkestraV1.RevokeEnrollmentTokenRequest]) (*connect.Response[orkestraV1.AuthEmpty], error) {
-	if err := requireRole(ctx, "admin", "operator"); err != nil {
+	if err := requireRole(ctx, "admin"); err != nil {
 		return nil, err
 	}
 	if err := h.q.RevokeEnrollmentToken(ctx, req.Msg.Id); err != nil {
@@ -558,7 +581,7 @@ func (h *AuthServiceHandler) RevokeEnrollmentToken(ctx context.Context, req *con
 
 // helpers
 
-func userToProto(u store.User, roles []string) *orkestraV1.User {
+func userToProto(u store.User, roles []string, bindings []*orkestraV1.RoleBinding) *orkestraV1.User {
 	var displayName string
 	if u.DisplayName != nil {
 		displayName = *u.DisplayName
@@ -577,7 +600,21 @@ func userToProto(u store.User, roles []string) *orkestraV1.User {
 		CreatedAt:   u.CreatedAt,
 		LastLoginAt: lastLogin,
 		Roles:       roles,
+		Bindings:    bindings,
 	}
+}
+
+// loadUserBindings fetches and converts all role bindings for a user into proto form.
+func (h *AuthServiceHandler) loadUserBindings(ctx context.Context, userID string) []*orkestraV1.RoleBinding {
+	rows, err := h.q.ListRoleBindingsByUser(ctx, userID)
+	if err != nil {
+		return nil
+	}
+	out := make([]*orkestraV1.RoleBinding, 0, len(rows))
+	for _, rb := range rows {
+		out = append(out, roleBindingToProto(rb))
+	}
+	return out
 }
 
 func roleBindingToProto(rb store.RoleBinding) *orkestraV1.RoleBinding {
@@ -643,7 +680,7 @@ func generateAPIKey() (rawKey, keyHash string, err error) {
 	return
 }
 
-func apiKeyToProto(k store.APIKey, rawKey string) *orkestraV1.APIKey {
+func apiKeyToProto(k store.ApiKey, rawKey string) *orkestraV1.APIKey {
 	p := &orkestraV1.APIKey{
 		Id:        k.ID,
 		UserId:    k.UserID,

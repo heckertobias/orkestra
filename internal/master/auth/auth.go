@@ -29,11 +29,24 @@ const (
 	ctxSessionID contextKey = iota
 )
 
+// RoleBinding holds a single resolved role binding for the authenticated user.
+// ServerID and StackID are empty strings when the binding is global (NULL in DB).
+type RoleBinding struct {
+	Role     string // role name: admin | operator | viewer | secrets-manager
+	ServerID string // "" = global
+	StackID  string // "" = applies to all stacks on the server
+}
+
 // UserCtx holds the authenticated user from the session.
 type UserCtx struct {
 	ID       string
 	Username string
-	Roles    []string
+	// Roles contains the names of globally-scoped roles (server_id IS NULL AND stack_id IS NULL).
+	// Used only for the proto User.roles field for display purposes.
+	Roles []string
+	// Bindings is the full list of role bindings (global + server-scoped + stack-scoped).
+	// All authorization decisions use this; never use Roles for permission checks.
+	Bindings []RoleBinding
 }
 
 // WithUser stores the authenticated user in the context.

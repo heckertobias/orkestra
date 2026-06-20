@@ -8,12 +8,18 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 
+	masterauth "github.com/heckertobias/orkestra/internal/master/auth"
 	"github.com/heckertobias/orkestra/internal/master/store"
 	orkestraV1 "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1"
 )
 
 // CreateStack creates a new stack with an initial version.
+// Any operator (any scope) may create a stack definition.
 func (h *StackServiceHandler) CreateStack(ctx context.Context, req *connect.Request[orkestraV1.CreateStackRequest]) (*connect.Response[orkestraV1.Stack], error) {
+	u := masterauth.UserFromContext(ctx)
+	if !masterauth.HasAnyOperator(u) {
+		return nil, errPermission("operator role required to create stacks")
+	}
 	r := req.Msg
 	if r.Name == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("name is required"))
@@ -55,7 +61,13 @@ func (h *StackServiceHandler) CreateStack(ctx context.Context, req *connect.Requ
 }
 
 // UpdateStack creates a new immutable version for an existing stack.
+// Requires operator access on at least one server the stack is assigned to (or any operator for unassigned stacks).
 func (h *StackServiceHandler) UpdateStack(ctx context.Context, req *connect.Request[orkestraV1.UpdateStackRequest]) (*connect.Response[orkestraV1.StackVersion], error) {
+	u := masterauth.UserFromContext(ctx)
+	serverIDs := h.assignedServerIDs(ctx, req.Msg.Id)
+	if !masterauth.CanEditStack(u, req.Msg.Id, serverIDs) {
+		return nil, errPermission("operator access required on an assigned server to update this stack")
+	}
 	r := req.Msg
 	nextVer, err := h.q.GetNextVersionNumber(ctx, r.Id)
 	if err != nil {
@@ -93,8 +105,13 @@ func (h *StackServiceHandler) UpdateStack(ctx context.Context, req *connect.Requ
 	}), nil
 }
 
-// GetStack returns a stack by ID.
+// GetStack returns a stack by ID (viewer+ access required on any assigned server).
 func (h *StackServiceHandler) GetStack(ctx context.Context, req *connect.Request[orkestraV1.GetStackRequest]) (*connect.Response[orkestraV1.Stack], error) {
+	u := masterauth.UserFromContext(ctx)
+	serverIDs := h.assignedServerIDs(ctx, req.Msg.Id)
+	if !masterauth.CanViewStack(u, req.Msg.Id, serverIDs) {
+		return nil, errPermission("no access to this stack")
+	}
 	row, err := h.q.GetStack(ctx, req.Msg.Id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("stack not found"))
@@ -103,22 +120,32 @@ func (h *StackServiceHandler) GetStack(ctx context.Context, req *connect.Request
 	return connect.NewResponse(stackFromRow(row, int32(latest.Version))), nil
 }
 
-// ListStacks returns all non-deleted stacks.
+// ListStacks returns all non-deleted stacks the caller may view.
 func (h *StackServiceHandler) ListStacks(ctx context.Context, _ *connect.Request[orkestraV1.ListStacksRequest]) (*connect.Response[orkestraV1.ListStacksResponse], error) {
+	u := masterauth.UserFromContext(ctx)
 	rows, err := h.q.ListStacks(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list stacks: %w", err))
 	}
 	stacks := make([]*orkestraV1.Stack, 0, len(rows))
 	for _, row := range rows {
+		serverIDs := h.assignedServerIDs(ctx, row.ID)
+		if !masterauth.CanViewStack(u, row.ID, serverIDs) {
+			continue
+		}
 		latest, _ := h.q.GetLatestStackVersion(ctx, row.ID)
 		stacks = append(stacks, stackFromRow(row, int32(latest.Version)))
 	}
 	return connect.NewResponse(&orkestraV1.ListStacksResponse{Stacks: stacks}), nil
 }
 
-// DeleteStack soft-deletes a stack.
+// DeleteStack soft-deletes a stack. Requires operator access on ALL assigned servers.
 func (h *StackServiceHandler) DeleteStack(ctx context.Context, req *connect.Request[orkestraV1.DeleteStackRequest]) (*connect.Response[orkestraV1.Empty], error) {
+	u := masterauth.UserFromContext(ctx)
+	serverIDs := h.assignedServerIDs(ctx, req.Msg.Id)
+	if !masterauth.CanDeleteStack(u, req.Msg.Id, serverIDs) {
+		return nil, errPermission("operator access required on all assigned servers to delete this stack")
+	}
 	if err := h.q.SoftDeleteStack(ctx, store.SoftDeleteStackParams{
 		DeletedAt: ptrInt64(time.Now().UnixMilli()),
 		ID:        req.Msg.Id,
@@ -128,8 +155,13 @@ func (h *StackServiceHandler) DeleteStack(ctx context.Context, req *connect.Requ
 	return connect.NewResponse(&orkestraV1.Empty{}), nil
 }
 
-// ListStackVersions returns all versions for a stack.
+// ListStackVersions returns all versions for a stack (viewer+ access required).
 func (h *StackServiceHandler) ListStackVersions(ctx context.Context, req *connect.Request[orkestraV1.ListStackVersionsRequest]) (*connect.Response[orkestraV1.ListStackVersionsResponse], error) {
+	u := masterauth.UserFromContext(ctx)
+	serverIDs := h.assignedServerIDs(ctx, req.Msg.StackId)
+	if !masterauth.CanViewStack(u, req.Msg.StackId, serverIDs) {
+		return nil, errPermission("no access to this stack")
+	}
 	rows, err := h.q.ListStackVersions(ctx, req.Msg.StackId)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list versions: %w", err))
@@ -148,7 +180,12 @@ func (h *StackServiceHandler) ListStackVersions(ctx context.Context, req *connec
 }
 
 // AssignStack assigns a stack version to a server and triggers reconciliation.
+// Requires operator access on (serverID, stackID).
 func (h *StackServiceHandler) AssignStack(ctx context.Context, req *connect.Request[orkestraV1.AssignStackRequest]) (*connect.Response[orkestraV1.Assignment], error) {
+	u := masterauth.UserFromContext(ctx)
+	if !masterauth.CanOperateOn(u, req.Msg.ServerId, req.Msg.StackId) {
+		return nil, errPermission("operator access required on this server/stack")
+	}
 	r := req.Msg
 	versionID := r.StackVersionId
 	if versionID == "" {
@@ -192,7 +229,12 @@ func (h *StackServiceHandler) AssignStack(ctx context.Context, req *connect.Requ
 }
 
 // UnassignStack removes a stack assignment.
+// Requires operator access on (serverID, stackID).
 func (h *StackServiceHandler) UnassignStack(ctx context.Context, req *connect.Request[orkestraV1.UnassignStackRequest]) (*connect.Response[orkestraV1.Empty], error) {
+	u := masterauth.UserFromContext(ctx)
+	if !masterauth.CanOperateOn(u, req.Msg.ServerId, req.Msg.StackId) {
+		return nil, errPermission("operator access required on this server/stack")
+	}
 	if err := h.q.DeleteAssignment(ctx, store.DeleteAssignmentParams{
 		ServerID: req.Msg.ServerId,
 		StackID:  req.Msg.StackId,

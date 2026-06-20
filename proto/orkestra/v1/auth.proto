@@ -46,7 +46,8 @@ message User {
   bool   disabled      = 6;
   int64  created_at    = 7;
   int64  last_login_at = 8;
-  repeated string roles = 9; // effective global roles
+  repeated string roles    = 9;  // effective global role names (for display only)
+  repeated RoleBinding bindings = 10; // full binding list for client-side RBAC gating
 }
 
 message LoginRequest {

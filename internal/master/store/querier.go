@@ -14,11 +14,13 @@ type Querier interface {
 	DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) error
 	DeleteRoleBinding(ctx context.Context, id string) error
 	DeleteSecret(ctx context.Context, id string) error
+	GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error)
 	GetActiveCertificateForAgent(ctx context.Context, agentID string) (Certificate, error)
 	GetCertificateByFingerprint(ctx context.Context, fingerprint string) (Certificate, error)
 	GetEnrollmentTokenByHash(ctx context.Context, tokenHash string) (EnrollmentToken, error)
 	GetLatestStackVersion(ctx context.Context, stackID string) (StackVersion, error)
 	GetNextVersionNumber(ctx context.Context, stackID string) (int32, error)
+	GetOIDCConfig(ctx context.Context) (OidcConfig, error)
 	GetSecret(ctx context.Context, id string) (Secret, error)
 	GetServer(ctx context.Context, id string) (Server, error)
 	GetSession(ctx context.Context, arg GetSessionParams) (Session, error)
@@ -26,11 +28,15 @@ type Querier interface {
 	GetStackVersion(ctx context.Context, id string) (StackVersion, error)
 	GetUser(ctx context.Context, id string) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
+	// Returns all role bindings (global + scoped) for a user, including role name and scope columns.
+	GetUserRoleBindings(ctx context.Context, userID string) ([]GetUserRoleBindingsRow, error)
 	GetUserRoles(ctx context.Context, userID string) ([]string, error)
 	IncrementTokenUsage(ctx context.Context, id string) error
+	InsertAPIKey(ctx context.Context, arg InsertAPIKeyParams) (ApiKey, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
 	InsertCertificate(ctx context.Context, arg InsertCertificateParams) error
 	InsertEnrollmentToken(ctx context.Context, arg InsertEnrollmentTokenParams) (EnrollmentToken, error)
+	InsertEvent(ctx context.Context, arg InsertEventParams) error
 	InsertRoleBinding(ctx context.Context, arg InsertRoleBindingParams) (RoleBinding, error)
 	InsertSecret(ctx context.Context, arg InsertSecretParams) (Secret, error)
 	InsertServer(ctx context.Context, arg InsertServerParams) (Server, error)
@@ -38,11 +44,16 @@ type Querier interface {
 	InsertStack(ctx context.Context, arg InsertStackParams) (Stack, error)
 	InsertStackVersion(ctx context.Context, arg InsertStackVersionParams) (StackVersion, error)
 	InsertUser(ctx context.Context, arg InsertUserParams) (User, error)
+	ListAPIKeysByUser(ctx context.Context, userID string) ([]ApiKey, error)
+	ListAllAPIKeys(ctx context.Context) ([]ApiKey, error)
 	ListAllRoleBindings(ctx context.Context) ([]RoleBinding, error)
 	ListAssignmentsForServer(ctx context.Context, serverID string) ([]ListAssignmentsForServerRow, error)
 	ListAssignmentsForStack(ctx context.Context, stackID string) ([]Assignment, error)
 	ListAuditLog(ctx context.Context, limit int32) ([]AuditLog, error)
 	ListEnrollmentTokens(ctx context.Context) ([]EnrollmentToken, error)
+	ListEventsAfter(ctx context.Context, arg ListEventsAfterParams) ([]Event, error)
+	ListEventsFiltered(ctx context.Context, arg ListEventsFilteredParams) ([]Event, error)
+	ListRecentEvents(ctx context.Context, limit int32) ([]Event, error)
 	ListRoleBindingsByUser(ctx context.Context, userID string) ([]RoleBinding, error)
 	ListSecrets(ctx context.Context) ([]ListSecretsRow, error)
 	ListServers(ctx context.Context) ([]Server, error)
@@ -50,6 +61,7 @@ type Querier interface {
 	ListStacks(ctx context.Context) ([]Stack, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	MarkOfflineServers(ctx context.Context, lastSeenAt *int64) error
+	RevokeAPIKey(ctx context.Context, id string) error
 	RevokeCertificate(ctx context.Context, arg RevokeCertificateParams) error
 	RevokeEnrollmentToken(ctx context.Context, id string) error
 	RevokeSession(ctx context.Context, id string) error
@@ -57,12 +69,14 @@ type Querier interface {
 	SetPasswordHash(ctx context.Context, arg SetPasswordHashParams) error
 	SoftDeleteServer(ctx context.Context, arg SoftDeleteServerParams) error
 	SoftDeleteStack(ctx context.Context, arg SoftDeleteStackParams) error
+	TouchAPIKey(ctx context.Context, arg TouchAPIKeyParams) error
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
 	UpdateSecret(ctx context.Context, arg UpdateSecretParams) (Secret, error)
 	UpdateServer(ctx context.Context, arg UpdateServerParams) (Server, error)
 	UpdateServerStatus(ctx context.Context, arg UpdateServerStatusParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpsertAssignment(ctx context.Context, arg UpsertAssignmentParams) (Assignment, error)
+	UpsertOIDCConfig(ctx context.Context, arg UpsertOIDCConfigParams) (OidcConfig, error)
 }
 
 var _ Querier = (*Queries)(nil)

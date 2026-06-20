@@ -1,21 +1,13 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { Server, Layers, KeyRound, Users, LayoutDashboard, Settings, ClipboardList, LogOut } from 'lucide-react'
 import { cn } from '@/lib/cn'
-import { useAuth } from '@/lib/auth'
-
-const nav = [
-  { to: '/',         label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/servers',  label: 'Servers',   icon: Server },
-  { to: '/stacks',   label: 'Stacks',    icon: Layers },
-  { to: '/secrets',  label: 'Secrets',   icon: KeyRound },
-  { to: '/users',    label: 'Users',     icon: Users },
-  { to: '/audit',    label: 'Audit Log', icon: ClipboardList },
-  { to: '/settings', label: 'Settings',  icon: Settings },
-]
+import { useAuth, isAdmin, canManageSecrets } from '@/lib/auth'
 
 export function Sidebar() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const admin = isAdmin(user)
+  const secretsMgr = canManageSecrets(user)
 
   async function handleLogout() {
     await logout()
@@ -42,7 +34,15 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 px-2 py-3 space-y-0.5">
-        {nav.map(({ to, label, icon: Icon }) => (
+        {[
+          { to: '/',         label: 'Dashboard', icon: LayoutDashboard, show: true },
+          { to: '/servers',  label: 'Servers',   icon: Server,          show: true },
+          { to: '/stacks',   label: 'Stacks',    icon: Layers,          show: true },
+          { to: '/secrets',  label: 'Secrets',   icon: KeyRound,        show: secretsMgr },
+          { to: '/users',    label: 'Users',     icon: Users,           show: admin },
+          { to: '/audit',    label: 'Audit Log', icon: ClipboardList,   show: admin },
+          { to: '/settings', label: 'Settings',  icon: Settings,        show: admin },
+        ].filter(item => item.show).map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}

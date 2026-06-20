@@ -55,3 +55,11 @@ DELETE FROM role_bindings WHERE id = $1;
 SELECT r.name FROM role_bindings rb
 JOIN roles r ON r.id = rb.role_id
 WHERE rb.user_id = $1 AND rb.server_id IS NULL AND rb.stack_id IS NULL;
+
+-- name: GetUserRoleBindings :many
+-- Returns all role bindings (global + scoped) for a user, including role name and scope columns.
+SELECT rb.id, r.name AS role_name, rb.server_id, rb.stack_id
+FROM role_bindings rb
+JOIN roles r ON r.id = rb.role_id
+WHERE rb.user_id = $1
+ORDER BY rb.created_at;

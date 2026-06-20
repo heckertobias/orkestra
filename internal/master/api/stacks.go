@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/heckertobias/orkestra/internal/master/agentgw"
+	masterauth "github.com/heckertobias/orkestra/internal/master/auth"
 	"github.com/heckertobias/orkestra/internal/master/store"
 	orkestraV1 "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1"
 )
@@ -32,8 +33,28 @@ func NewStackServiceHandler(db *pgxpool.Pool, registry *agentgw.Registry, reconc
 	return &StackServiceHandler{db: db, q: store.New(db), registry: registry, reconcilerFn: reconcilerFn}
 }
 
-// ListServers returns all non-deleted servers merged with live connection state.
+// assignedServerIDs returns the distinct server IDs a stack is assigned to.
+// Returns an empty slice if the stack is unassigned (any operator may then manage it).
+func (h *StackServiceHandler) assignedServerIDs(ctx context.Context, stackID string) []string {
+	rows, err := h.q.ListAssignmentsForStack(ctx, stackID)
+	if err != nil {
+		return nil
+	}
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.ServerID)
+	}
+	return ids
+}
+
+// errPermission returns a standardised PermissionDenied Connect error.
+func errPermission(msg string) error {
+	return connect.NewError(connect.CodePermissionDenied, fmt.Errorf("%s", msg))
+}
+
+// ListServers returns all non-deleted servers, filtered to those the caller may view.
 func (h *StackServiceHandler) ListServers(ctx context.Context, req *connect.Request[orkestraV1.ListServersRequest]) (*connect.Response[orkestraV1.ListServersResponse], error) {
+	u := masterauth.UserFromContext(ctx)
 	rows, err := h.q.ListServers(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list servers: %w", err))
@@ -46,17 +67,37 @@ func (h *StackServiceHandler) ListServers(ctx context.Context, req *connect.Requ
 
 	servers := make([]*orkestraV1.Server, 0, len(rows))
 	for _, row := range rows {
+		if !masterauth.CanViewServer(u, row.ID) {
+			continue
+		}
 		status := row.Status
 		if connected[row.ID] && status != "online" {
 			status = "online"
 		}
-		servers = append(servers, serverFromRow(row, status))
+		srv := serverFromRow(row, status)
+		if asgns, err := h.q.ListAssignmentsForServer(ctx, row.ID); err == nil {
+			for _, a := range asgns {
+				srv.Assignments = append(srv.Assignments, &orkestraV1.Assignment{
+					Id:             a.ID,
+					ServerId:       a.ServerID,
+					StackId:        a.StackID,
+					StackVersionId: a.StackVersionID,
+					DesiredStatus:  a.DesiredStatus,
+					AssignedAt:     a.AssignedAt,
+				})
+			}
+		}
+		servers = append(servers, srv)
 	}
 	return connect.NewResponse(&orkestraV1.ListServersResponse{Servers: servers}), nil
 }
 
 // GetServer returns a single server by ID.
 func (h *StackServiceHandler) GetServer(ctx context.Context, req *connect.Request[orkestraV1.GetServerRequest]) (*connect.Response[orkestraV1.Server], error) {
+	u := masterauth.UserFromContext(ctx)
+	if !masterauth.CanViewServer(u, req.Msg.Id) {
+		return nil, errPermission("no access to this server")
+	}
 	row, err := h.q.GetServer(ctx, req.Msg.Id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
@@ -68,8 +109,12 @@ func (h *StackServiceHandler) GetServer(ctx context.Context, req *connect.Reques
 	return connect.NewResponse(serverFromRow(row, status)), nil
 }
 
-// UpdateServer updates server name and labels.
+// UpdateServer updates server name and labels (admin only).
 func (h *StackServiceHandler) UpdateServer(ctx context.Context, req *connect.Request[orkestraV1.UpdateServerRequest]) (*connect.Response[orkestraV1.Server], error) {
+	u := masterauth.UserFromContext(ctx)
+	if !masterauth.IsAdmin(u) {
+		return nil, errPermission("server metadata changes require admin role")
+	}
 	labelsJSON, err := labelsToJSON(req.Msg.Labels)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
@@ -85,8 +130,12 @@ func (h *StackServiceHandler) UpdateServer(ctx context.Context, req *connect.Req
 	return connect.NewResponse(serverFromRow(row, row.Status)), nil
 }
 
-// DeleteServer soft-deletes a server.
+// DeleteServer soft-deletes a server (admin only).
 func (h *StackServiceHandler) DeleteServer(ctx context.Context, req *connect.Request[orkestraV1.DeleteServerRequest]) (*connect.Response[orkestraV1.Empty], error) {
+	u := masterauth.UserFromContext(ctx)
+	if !masterauth.IsAdmin(u) {
+		return nil, errPermission("deleting a server requires admin role")
+	}
 	if err := h.q.SoftDeleteServer(ctx, store.SoftDeleteServerParams{
 		DeletedAt: ptrInt64(time.Now().UnixMilli()),
 		ID:        req.Msg.Id,
@@ -99,6 +148,12 @@ func (h *StackServiceHandler) DeleteServer(ctx context.Context, req *connect.Req
 // Stack CRUD implementations are in stacks_crud.go.
 
 func (h *StackServiceHandler) ExecOnContainer(ctx context.Context, req *connect.Request[orkestraV1.ExecOnContainerRequest]) (*connect.Response[orkestraV1.ExecOnContainerResponse], error) {
+	u := masterauth.UserFromContext(ctx)
+	// Container→Stack resolution is not yet available (agent_state not populated).
+	// Use server-level check: operator access on the server (stack_id unset = any stack).
+	if !masterauth.CanOperateOn(u, req.Msg.ServerId, "") {
+		return nil, errPermission("operator access required on this server")
+	}
 	sess := h.registry.Get(req.Msg.ServerId)
 	if sess == nil {
 		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("server not connected"))
@@ -116,20 +171,35 @@ func (h *StackServiceHandler) ExecOnContainer(ctx context.Context, req *connect.
 	return connect.NewResponse(&orkestraV1.ExecOnContainerResponse{Success: true}), nil
 }
 
-func (h *StackServiceHandler) StreamLogs(_ context.Context, req *connect.Request[orkestraV1.StreamLogsRequest], stream *connect.ServerStream[orkestraV1.LogLine]) error {
+func (h *StackServiceHandler) StreamLogs(ctx context.Context, req *connect.Request[orkestraV1.StreamLogsRequest], stream *connect.ServerStream[orkestraV1.LogLine]) error {
+	u := masterauth.UserFromContext(ctx)
+	if !masterauth.CanViewOn(u, req.Msg.ServerId, "") {
+		return errPermission("viewer access required on this server")
+	}
 	return connect.NewError(connect.CodeUnimplemented, fmt.Errorf("stream bridging implemented in M2 integration"))
 }
 
-func (h *StackServiceHandler) StreamStats(_ context.Context, req *connect.Request[orkestraV1.StreamStatsRequest], stream *connect.ServerStream[orkestraV1.ServerStats]) error {
+func (h *StackServiceHandler) StreamStats(ctx context.Context, req *connect.Request[orkestraV1.StreamStatsRequest], stream *connect.ServerStream[orkestraV1.ServerStats]) error {
+	u := masterauth.UserFromContext(ctx)
+	if !masterauth.CanViewServer(u, req.Msg.ServerId) {
+		return errPermission("viewer access required on this server")
+	}
 	return connect.NewError(connect.CodeUnimplemented, fmt.Errorf("stream bridging implemented in M2 integration"))
 }
 
 // StreamEvents polls the events table and streams new events to the client.
 // It sends the last 20 events on connect, then polls for new events every 2 seconds.
 func (h *StackServiceHandler) StreamEvents(ctx context.Context, req *connect.Request[orkestraV1.StreamEventsRequest], stream *connect.ServerStream[orkestraV1.Event]) error {
+	u := masterauth.UserFromContext(ctx)
+	if req.Msg.ServerId != "" && !masterauth.CanViewServer(u, req.Msg.ServerId) {
+		return errPermission("viewer access required on this server")
+	}
+
+	serverID := req.Msg.ServerId
+	stackID := req.Msg.StackId
 	filter := store.ListEventsFilteredParams{
-		ServerID: ptrStringIfNonEmpty(req.Msg.ServerId),
-		StackID:  ptrStringIfNonEmpty(req.Msg.StackId),
+		ServerID: serverID,
+		StackID:  stackID,
 	}
 
 	// Send recent history first.
@@ -157,9 +227,9 @@ func (h *StackServiceHandler) StreamEvents(ctx context.Context, req *connect.Req
 			return nil
 		case <-ticker.C:
 			newRows, err := h.q.ListEventsAfter(ctx, store.ListEventsAfterParams{
-				ID:       lastID,
-				ServerID: filter.ServerID,
-				StackID:  filter.StackID,
+				AfterID:  lastID,
+				ServerID: serverID,
+				StackID:  stackID,
 			})
 			if err != nil {
 				continue

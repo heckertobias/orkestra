@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { KeyRound, Plus, RefreshCw, Trash2, Eye, EyeOff, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { useAuth, canManageSecrets } from '@/lib/auth'
 
 interface SecretMeta {
   id: string
@@ -29,6 +30,8 @@ interface CreateForm {
 const empty: CreateForm = { name: '', description: '', provider: 'builtin', value: '', baoMount: '', baoPath: '', baoKey: '' }
 
 export function SecretsPage() {
+  const { user } = useAuth()
+  const secretsMgr = canManageSecrets(user)
   const [secrets, setSecrets] = useState<SecretMeta[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -160,11 +163,13 @@ export function SecretsPage() {
             style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
             <RefreshCw size={14} /> Refresh
           </button>
-          <button onClick={() => setShowCreate(true)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium"
-            style={{ backgroundColor: 'var(--accent)', color: '#0d1117' }}>
-            <Plus size={14} /> New Secret
-          </button>
+          {secretsMgr && (
+            <button onClick={() => setShowCreate(true)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium"
+              style={{ backgroundColor: 'var(--accent)', color: '#0d1117' }}>
+              <Plus size={14} /> New Secret
+            </button>
+          )}
         </div>
       </div>
 
@@ -209,7 +214,7 @@ export function SecretsPage() {
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex gap-2">
-                    {s.provider === 'builtin' && (
+                    {secretsMgr && s.provider === 'builtin' && (
                       <button
                         onClick={() => setRevealState({ id: s.id, value: '', password: '', showing: false })}
                         className="p-1 rounded hover:bg-[var(--surface-2)]"
@@ -218,13 +223,15 @@ export function SecretsPage() {
                         <Eye size={14} />
                       </button>
                     )}
-                    <button
-                      onClick={() => setDeleteTarget(s)}
-                      className="p-1 rounded hover:bg-[var(--surface-2)]"
-                      style={{ color: 'var(--text-muted)' }}
-                      title="Delete secret">
-                      <Trash2 size={14} />
-                    </button>
+                    {secretsMgr && (
+                      <button
+                        onClick={() => setDeleteTarget(s)}
+                        className="p-1 rounded hover:bg-[var(--surface-2)]"
+                        style={{ color: 'var(--text-muted)' }}
+                        title="Delete secret">
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>

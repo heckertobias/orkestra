@@ -94,6 +94,47 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 	return i, err
 }
 
+const getUserRoleBindings = `-- name: GetUserRoleBindings :many
+SELECT rb.id, r.name AS role_name, rb.server_id, rb.stack_id
+FROM role_bindings rb
+JOIN roles r ON r.id = rb.role_id
+WHERE rb.user_id = $1
+ORDER BY rb.created_at
+`
+
+type GetUserRoleBindingsRow struct {
+	ID       string  `json:"id"`
+	RoleName string  `json:"role_name"`
+	ServerID *string `json:"server_id"`
+	StackID  *string `json:"stack_id"`
+}
+
+// Returns all role bindings (global + scoped) for a user, including role name and scope columns.
+func (q *Queries) GetUserRoleBindings(ctx context.Context, userID string) ([]GetUserRoleBindingsRow, error) {
+	rows, err := q.db.Query(ctx, getUserRoleBindings, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetUserRoleBindingsRow{}
+	for rows.Next() {
+		var i GetUserRoleBindingsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RoleName,
+			&i.ServerID,
+			&i.StackID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getUserRoles = `-- name: GetUserRoles :many
 SELECT r.name FROM role_bindings rb
 JOIN roles r ON r.id = rb.role_id

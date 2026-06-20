@@ -51,6 +51,10 @@ func (h *SecretServiceHandler) GetSecret(ctx context.Context, req *connect.Reque
 }
 
 func (h *SecretServiceHandler) CreateSecret(ctx context.Context, req *connect.Request[orkestraV1.CreateSecretRequest]) (*connect.Response[orkestraV1.SecretMeta], error) {
+	u := masterauth.UserFromContext(ctx)
+	if !masterauth.CanManageSecrets(u) {
+		return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("requires secrets-manager or admin role"))
+	}
 	r := req.Msg
 	if r.Name == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("name is required"))
@@ -96,6 +100,10 @@ func (h *SecretServiceHandler) CreateSecret(ctx context.Context, req *connect.Re
 }
 
 func (h *SecretServiceHandler) UpdateSecret(ctx context.Context, req *connect.Request[orkestraV1.UpdateSecretRequest]) (*connect.Response[orkestraV1.SecretMeta], error) {
+	u := masterauth.UserFromContext(ctx)
+	if !masterauth.CanManageSecrets(u) {
+		return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("requires secrets-manager or admin role"))
+	}
 	r := req.Msg
 	existing, err := h.q.GetSecret(ctx, r.Id)
 	if err != nil {
@@ -135,6 +143,10 @@ func (h *SecretServiceHandler) UpdateSecret(ctx context.Context, req *connect.Re
 }
 
 func (h *SecretServiceHandler) DeleteSecret(ctx context.Context, req *connect.Request[orkestraV1.DeleteSecretRequest]) (*connect.Response[orkestraV1.SecretEmpty], error) {
+	u := masterauth.UserFromContext(ctx)
+	if !masterauth.CanManageSecrets(u) {
+		return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("requires secrets-manager or admin role"))
+	}
 	bindings, err := h.q.CountSecretBindings(ctx, req.Msg.Id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("check bindings: %w", err))
@@ -151,6 +163,23 @@ func (h *SecretServiceHandler) DeleteSecret(ctx context.Context, req *connect.Re
 }
 
 func (h *SecretServiceHandler) RevealSecret(ctx context.Context, req *connect.Request[orkestraV1.RevealSecretRequest]) (*connect.Response[orkestraV1.RevealSecretResponse], error) {
+	actor := masterauth.UserFromContext(ctx)
+	if !masterauth.CanManageSecrets(actor) {
+		return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("requires secrets-manager or admin role"))
+	}
+
+	// Re-authenticate: verify the provided password against the user's stored hash.
+	if req.Msg.ReauthPassword == "" {
+		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("re-authentication password required"))
+	}
+	dbUser, err := h.q.GetUser(ctx, actor.ID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("load user: %w", err))
+	}
+	if dbUser.PasswordHash == nil || !masterauth.VerifyPassword(*dbUser.PasswordHash, req.Msg.ReauthPassword) {
+		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid password"))
+	}
+
 	row, err := h.q.GetSecret(ctx, req.Msg.Id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("secret not found"))
@@ -162,7 +191,6 @@ func (h *SecretServiceHandler) RevealSecret(ctx context.Context, req *connect.Re
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("decrypt secret: %w", err))
 	}
-	actor := masterauth.UserFromContext(ctx)
 	h.audit(ctx, actor, "secret.reveal", "secret", row.ID, nil)
 	return connect.NewResponse(&orkestraV1.RevealSecretResponse{
 		ValueBytes: plaintext,
@@ -171,6 +199,10 @@ func (h *SecretServiceHandler) RevealSecret(ctx context.Context, req *connect.Re
 }
 
 func (h *SecretServiceHandler) MigrateProvider(ctx context.Context, req *connect.Request[orkestraV1.MigrateProviderRequest]) (*connect.Response[orkestraV1.SecretMeta], error) {
+	u := masterauth.UserFromContext(ctx)
+	if !masterauth.CanManageSecrets(u) {
+		return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("requires secrets-manager or admin role"))
+	}
 	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("provider migration available in a future release"))
 }
 

@@ -18,6 +18,29 @@ import (
 
 const sessionCookie = "orkestra_session"
 
+// buildUserCtx loads a user's roles and bindings from the DB and constructs a UserCtx.
+func buildUserCtx(ctx context.Context, q *store.Queries, userID, username string) *UserCtx {
+	roles, _ := q.GetUserRoles(ctx, userID)
+	rawBindings, _ := q.GetUserRoleBindings(ctx, userID)
+	bindings := make([]RoleBinding, 0, len(rawBindings))
+	for _, rb := range rawBindings {
+		b := RoleBinding{Role: rb.RoleName}
+		if rb.ServerID != nil {
+			b.ServerID = *rb.ServerID
+		}
+		if rb.StackID != nil {
+			b.StackID = *rb.StackID
+		}
+		bindings = append(bindings, b)
+	}
+	return &UserCtx{
+		ID:       userID,
+		Username: username,
+		Roles:    roles,
+		Bindings: bindings,
+	}
+}
+
 // SessionMiddleware wraps an HTTP handler: reads the session cookie or Bearer API key,
 // resolves the user, and injects it into the request context.
 func SessionMiddleware(q *store.Queries) func(http.Handler) http.Handler {
@@ -36,12 +59,8 @@ func SessionMiddleware(q *store.Queries) func(http.Handler) http.Handler {
 				if err == nil {
 					user, err := q.GetUser(r.Context(), sess.UserID)
 					if err == nil && !user.Disabled {
-						roles, _ := q.GetUserRoles(r.Context(), user.ID)
-						ctx := WithUser(r.Context(), &UserCtx{
-							ID:       user.ID,
-							Username: user.Username,
-							Roles:    roles,
-						})
+						uctx := buildUserCtx(r.Context(), q, user.ID, user.Username)
+						ctx := WithUser(r.Context(), uctx)
 						ctx = WithSessionID(ctx, sessionID)
 						go func() {
 							_ = q.TouchSession(context.Background(), store.TouchSessionParams{
@@ -66,15 +85,15 @@ func SessionMiddleware(q *store.Queries) func(http.Handler) http.Handler {
 					if key.ExpiresAt == nil || *key.ExpiresAt > now {
 						user, err := q.GetUser(r.Context(), key.UserID)
 						if err == nil && !user.Disabled {
-							roles, _ := q.GetUserRoles(r.Context(), user.ID)
-							ctx := WithUser(r.Context(), &UserCtx{
-								ID:       user.ID,
-								Username: user.Username,
-								Roles:    roles,
-							})
+							uctx := buildUserCtx(r.Context(), q, user.ID, user.Username)
+							ctx := WithUser(r.Context(), uctx)
 							r = r.WithContext(ctx)
 							go func() {
-								_ = q.TouchAPIKey(context.Background(), key.ID, now)
+								nowMs := now
+								_ = q.TouchAPIKey(context.Background(), store.TouchAPIKeyParams{
+									ID:         key.ID,
+									LastUsedAt: &nowMs,
+								})
 							}()
 						}
 					}
