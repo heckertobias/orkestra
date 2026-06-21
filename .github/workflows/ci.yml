@@ -29,13 +29,13 @@ jobs:
         run: make sqlc
 
       - name: go vet
-        run: go vet ./...
+        run: go vet -tags dev ./...
 
       - name: Test
-        run: make test
+        run: go test -tags dev ./...
 
       - name: Build
-        run: make build
+        run: make build-dev
 
   lint:
     name: Lint
@@ -58,7 +58,7 @@ jobs:
         run: make proto && make sqlc
 
       - name: golangci-lint
-        run: golangci-lint run ./...
+        run: golangci-lint run --build-tags dev ./...
 
       - name: buf lint
         run: buf lint
@@ -91,4 +91,4 @@ jobs:
         run: make proto && make sqlc
 
       - name: Integration Tests
-        run: make test-integration
+        run: go test -tags "dev integration" -timeout 5m ./...
