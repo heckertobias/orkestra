@@ -29,6 +29,15 @@ func (q *Queries) DeleteRoleBinding(ctx context.Context, id string) error {
 	return err
 }
 
+const deleteUserByID = `-- name: DeleteUserByID :exec
+DELETE FROM users WHERE id = $1
+`
+
+func (q *Queries) DeleteUserByID(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, deleteUserByID, id)
+	return err
+}
+
 const getSession = `-- name: GetSession :one
 SELECT id, user_id, created_at, expires_at, last_seen, ip_address, user_agent, revoked FROM sessions WHERE id = $1 AND revoked = false AND expires_at > $2
 `

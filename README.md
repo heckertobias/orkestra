@@ -88,9 +88,35 @@ The script downloads the agent binary, enrolls it (PKI/mTLS), installs and start
 
 ## Development
 
-```bash
-# Prerequisites: Go 1.24+, buf, sqlc, Docker, Node 20+
+**Prerequisites:** Go 1.24+, buf, sqlc, Docker, Node 20+
 
+### Start a local dev instance
+
+```bash
+./run-dev.sh
+```
+
+The script starts a Postgres container (`orkestra-dev-pg`), builds the dev binary, and launches the Master and the Vite dev server. Both are stopped cleanly when you press Ctrl+C or the terminal closes.
+
+| URL | Purpose |
+|---|---|
+| http://localhost:8080 | Master UI & API |
+| http://localhost:5173 | Vite dev server (HMR) |
+| http://localhost:9090/metrics | Prometheus metrics |
+
+On the very first run the Master prints a one-time setup URL — open it to create the admin account.
+
+**Customising ports:** copy `.env.example` to `.env` and uncomment the relevant lines. The `.env` file is gitignored.
+
+```bash
+cp .env.example .env
+# edit .env, then:
+./run-dev.sh
+```
+
+### Individual make targets
+
+```bash
 make proto    # buf generate → Go + TypeScript stubs
 make sqlc     # sqlc generate → type-safe DB layer
 make build    # go build ./cmd/...
@@ -98,20 +124,27 @@ make test     # go test ./...
 make web      # npm run build in web/
 ```
 
+### Logs
+
+```
+/tmp/orkestra-master.log
+/tmp/orkestra-vite.log
+```
+
 ## Project Status
 
-orkestra is in early development (Milestone 0 — scaffolding complete). See [docs/09-roadmap.md](docs/09-roadmap.md) for the full implementation roadmap.
+See [docs/09-roadmap.md](docs/09-roadmap.md) for the full implementation roadmap.
 
 | Milestone | Description | Status |
 |---|---|---|
 | M0 | Repo scaffolding & tooling | ✅ Complete |
-| M1 | PKI, enrollment, persistent mTLS connection | 🔧 Next |
-| M2 | Container control & minimal Web UI | Planned |
-| M3 | Compose stacks & desired-state reconciliation | Planned |
-| M4 | Secrets (built-in + OpenBao) | Planned |
-| M5 | User auth, sessions & RBAC | Planned |
-| M6 | OIDC, metrics, event feed & polish | Planned |
-| M7 | Hardening, packaging & v0.1.0 release | Planned |
+| M1 | PKI, enrollment, persistent mTLS connection | ✅ Complete |
+| M2 | Container control & minimal Web UI | ✅ Complete |
+| M3 | Compose stacks & desired-state reconciliation | ✅ Complete |
+| M4 | Secrets (built-in + OpenBao) | ✅ Complete |
+| M5 | User auth, sessions & RBAC | ✅ Complete |
+| M6 | OIDC, metrics, event feed & polish | ✅ Complete |
+| M7 | Hardening, packaging & v0.1.0 release | 🔧 In progress |
 
 ## Documentation
 

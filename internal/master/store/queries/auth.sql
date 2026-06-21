@@ -18,6 +18,9 @@ RETURNING *;
 -- name: UpdateUser :one
 UPDATE users SET display_name = $2, disabled = $3 WHERE id = $1 RETURNING *;
 
+-- name: DeleteUserByID :exec
+DELETE FROM users WHERE id = $1;
+
 -- name: SetPasswordHash :exec
 UPDATE users SET password_hash = $2 WHERE id = $1;
 

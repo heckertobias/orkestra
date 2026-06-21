@@ -14,6 +14,7 @@ type Querier interface {
 	DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) error
 	DeleteRoleBinding(ctx context.Context, id string) error
 	DeleteSecret(ctx context.Context, id string) error
+	DeleteUserByID(ctx context.Context, id string) error
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error)
 	GetActiveCertificateForAgent(ctx context.Context, agentID string) (Certificate, error)
 	GetCertificateByFingerprint(ctx context.Context, fingerprint string) (Certificate, error)

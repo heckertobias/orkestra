@@ -298,6 +298,12 @@ func (h *AuthServiceHandler) UpdateUser(ctx context.Context, req *connect.Reques
 	if err := requireRole(ctx, "admin"); err != nil {
 		return nil, err
 	}
+	// An admin cannot deactivate their own account.
+	if req.Msg.Disabled {
+		if actor := masterauth.UserFromContext(ctx); actor != nil && req.Msg.Id == actor.ID {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("cannot deactivate your own account"))
+		}
+	}
 	row, err := h.q.UpdateUser(ctx, store.UpdateUserParams{
 		ID:          req.Msg.Id,
 		DisplayName: ptrString(req.Msg.DisplayName),
@@ -311,7 +317,9 @@ func (h *AuthServiceHandler) UpdateUser(ctx context.Context, req *connect.Reques
 	return connect.NewResponse(userToProto(row, roles, bindings)), nil
 }
 
-// DeleteUser disables a user (soft delete via disabled flag) — admin only.
+// DeleteUser permanently removes a user from the database (admin only).
+// Sessions and role bindings are cascade-deleted; stacks/secrets created by the
+// user retain a null owner (see migration 00004_user_ondelete).
 func (h *AuthServiceHandler) DeleteUser(ctx context.Context, req *connect.Request[orkestraV1.DeleteUserRequest]) (*connect.Response[orkestraV1.AuthEmpty], error) {
 	if err := requireRole(ctx, "admin"); err != nil {
 		return nil, err
@@ -320,11 +328,14 @@ func (h *AuthServiceHandler) DeleteUser(ctx context.Context, req *connect.Reques
 	if actor != nil && req.Msg.Id == actor.ID {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("cannot delete your own account"))
 	}
-	if _, err := h.q.UpdateUser(ctx, store.UpdateUserParams{
-		ID:       req.Msg.Id,
-		Disabled: true,
-	}); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("disable user: %w", err))
+	// Load user info before deletion for the audit entry.
+	target, _ := h.q.GetUser(ctx, req.Msg.Id)
+	if err := h.q.DeleteUserByID(ctx, req.Msg.Id); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete user: %w", err))
+	}
+	if actor != nil {
+		detail := fmt.Sprintf("actor=%s target=%s", actor.Username, target.Username)
+		h.auditAuth(ctx, nil, "user.delete", ptrString(detail))
 	}
 	return connect.NewResponse(&orkestraV1.AuthEmpty{}), nil
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, RefreshCw, Shield, X, ChevronDown, ChevronRight, Check, Info } from 'lucide-react'
+import { Plus, RefreshCw, Pencil, X, ChevronDown, ChevronRight, Check, Info } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { useAuth, isAdmin } from '@/lib/auth'
 
@@ -293,7 +293,12 @@ export function UsersPage() {
               <tr><td colSpan={6} className="px-4 py-8 text-center" style={{ color: 'var(--text-muted)' }}>No users yet.</td></tr>
             )}
             {users.map(u => (
-              <tr key={u.id} className="hover:bg-[var(--surface-2)]" style={{ borderBottom: '1px solid var(--border)' }}>
+              <tr
+                key={u.id}
+                className={`hover:bg-[var(--surface-2)]${admin ? ' cursor-pointer' : ''}`}
+                style={{ borderBottom: '1px solid var(--border)' }}
+                onDoubleClick={() => admin && setEditPerms(u)}
+              >
                 <td className="px-4 py-3 font-medium" style={{ color: 'var(--text)' }}>{u.username}</td>
                 <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>{u.displayName || '—'}</td>
                 <td className="px-4 py-3">
@@ -313,12 +318,12 @@ export function UsersPage() {
                 <td className="px-4 py-3">
                   {admin && (
                     <button
-                      onClick={() => setEditPerms(u)}
+                      onClick={e => { e.stopPropagation(); setEditPerms(u) }}
                       className="p-1 rounded hover:bg-[var(--surface-2)]"
                       style={{ color: 'var(--text-muted)' }}
                       title="Manage permissions"
                     >
-                      <Shield size={14} />
+                      <Pencil size={14} />
                     </button>
                   )}
                 </td>
@@ -407,11 +412,13 @@ function PermissionsMatrix({
   onClose: () => void
   onSaved: () => void
 }) {
-  const [matrix, setMatrix] = useState<MatrixState>(() =>
+  const [matrix, setMatrix]           = useState<MatrixState>(() =>
     buildMatrix(user.bindings, servers, stacks)
   )
-  const [busy, setBusy]   = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [disabled, setDisabled]       = useState(user.disabled)
+  const [busy, setBusy]               = useState(false)
+  const [error, setError]             = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   // An admin viewing their own permissions cannot turn Admin off.
   const adminLocked = isSelf && matrix.admin
@@ -420,12 +427,25 @@ function PermissionsMatrix({
     setBusy(true)
     setError(null)
     try {
+      const promises: Promise<void>[] = []
+
+      // Update account disabled state if it changed.
+      if (disabled !== user.disabled) {
+        promises.push(
+          fetch('/orkestra.v1.AuthService/UpdateUser', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: user.id, displayName: user.displayName, disabled }),
+          }).then(r => { if (!r.ok) return r.text().then(t => { throw new Error(apiError(t)) }) })
+        )
+      }
+
+      // Diff role bindings.
       const desired = matrixToBindings(matrix)
       const current = user.bindings.filter(b =>
         b.role === 'admin' || b.role === 'secrets-manager' ||
         b.role === 'viewer' || b.role === 'operator'
       )
-
       const toAdd = desired.filter(d =>
         !current.some(c => c.role === d.role && c.serverId === d.serverId && c.stackId === d.stackId)
       )
@@ -433,7 +453,7 @@ function PermissionsMatrix({
         !desired.some(d => d.role === c.role && d.serverId === c.serverId && d.stackId === c.stackId)
       )
 
-      await Promise.all([
+      promises.push(
         ...toAdd.map(b =>
           fetch('/orkestra.v1.AuthService/AssignRole', {
             method: 'POST',
@@ -448,10 +468,30 @@ function PermissionsMatrix({
             body: JSON.stringify({ bindingId: b.id }),
           }).then(r => { if (!r.ok) return r.text().then(t => { throw new Error(apiError(t)) }) })
         ),
-      ])
+      )
 
+      await Promise.all(promises)
       onSaved()
     } catch (e) {
+      setError(errText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function deleteUser() {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch('/orkestra.v1.AuthService/DeleteUser', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: user.id }),
+      })
+      if (!res.ok) throw new Error(apiError(await res.text()))
+      onSaved()
+    } catch (e) {
+      setConfirmDelete(false)
       setError(errText(e))
     } finally {
       setBusy(false)
@@ -466,133 +506,200 @@ function PermissionsMatrix({
   }
 
   return (
-    <div
-      className="fixed inset-0 flex items-center justify-center z-50 p-4"
-      style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}
-    >
+    <>
       <div
-        className="w-full max-w-3xl rounded-lg border flex flex-col"
-        style={{
-          backgroundColor: 'var(--surface)',
-          borderColor: 'var(--border)',
-          maxHeight: '85vh',
-        }}
+        className="fixed inset-0 flex items-center justify-center z-50 p-4"
+        style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}
       >
-        {/* Header */}
         <div
-          className="flex items-center justify-between px-6 py-4 border-b shrink-0"
-          style={{ borderColor: 'var(--border)' }}
+          className="w-full max-w-3xl rounded-lg border flex flex-col"
+          style={{
+            backgroundColor: 'var(--surface)',
+            borderColor: 'var(--border)',
+            maxHeight: '85vh',
+          }}
         >
-          <div>
-            <h2 className="font-semibold text-base" style={{ color: 'var(--text)' }}>
-              Permissions — {user.username}
-            </h2>
-            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-              Configure role-based access for this user
-            </p>
+          {/* Header */}
+          <div
+            className="flex items-center justify-between px-6 py-4 border-b shrink-0"
+            style={{ borderColor: 'var(--border)' }}
+          >
+            <div>
+              <h2 className="font-semibold text-base" style={{ color: 'var(--text)' }}>
+                Permissions — {user.username}
+              </h2>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                Configure role-based access for this user
+              </p>
+            </div>
+            <button onClick={onClose} style={{ color: 'var(--text-muted)' }}><X size={18} /></button>
           </div>
-          <button onClick={onClose} style={{ color: 'var(--text-muted)' }}><X size={18} /></button>
-        </div>
 
-        {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
-          {error && <ErrorBar>{error}</ErrorBar>}
+          {/* Scrollable content */}
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
+            {error && <ErrorBar>{error}</ErrorBar>}
 
-          {/* Admin switch */}
-          <div>
-            <p className="text-xs font-medium mb-3 uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-              Global Roles
-            </p>
-            <SwitchRow
-              checked={matrix.admin}
-              onChange={v => setMatrix(m => ({ ...m, admin: v }))}
-              disabled={adminLocked}
-              label="Admin"
-              description="Full system access — grants all permissions across servers, stacks and secrets"
-              warn
-            />
-            {adminLocked && (
-              <InfoBar>
-                You can't remove your own admin role — at least one administrator must always remain.
-              </InfoBar>
+            {/* Account active toggle */}
+            <div>
+              <p className="text-xs font-medium mb-3 uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+                Account
+              </p>
+              <SwitchRow
+                checked={!disabled}
+                onChange={v => setDisabled(!v)}
+                disabled={isSelf}
+                label="Account active"
+                description="Disabled accounts cannot log in and all their sessions are invalidated on next access"
+              />
+              {isSelf && (
+                <InfoBar>
+                  You can't deactivate your own account.
+                </InfoBar>
+              )}
+            </div>
+
+            {/* Admin switch */}
+            <div>
+              <p className="text-xs font-medium mb-3 uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+                Global Roles
+              </p>
+              <SwitchRow
+                checked={matrix.admin}
+                onChange={v => setMatrix(m => ({ ...m, admin: v }))}
+                disabled={adminLocked}
+                label="Admin"
+                description="Full system access — grants all permissions across servers, stacks and secrets"
+                warn
+              />
+              {adminLocked && (
+                <InfoBar>
+                  You can't remove your own admin role — at least one administrator must always remain.
+                </InfoBar>
+              )}
+            </div>
+
+            {/* Secrets Manager + Access Matrix — hidden when Admin is on */}
+            {matrix.admin ? (
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                Admins have full access to all servers, stacks and secrets.
+                Disable Admin to configure granular permissions.
+              </p>
+            ) : (
+              <>
+                {/* Secrets Manager */}
+                <SwitchRow
+                  checked={matrix.secretsManager}
+                  onChange={v => setMatrix(m => ({ ...m, secretsManager: v }))}
+                  label="Secrets Manager"
+                  description="Create, edit, reveal and delete secrets"
+                />
+
+                {/* Access matrix */}
+                <div>
+                  <p className="text-xs font-medium mb-3 uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+                    Access Matrix
+                  </p>
+                  <div className="rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--border)', backgroundColor: 'var(--surface-2)' }}>
+                          <th className="text-left px-4 py-2.5 text-xs font-medium w-1/4" style={{ color: 'var(--text-muted)' }}>Scope</th>
+                          <th className="text-left px-4 py-2.5 text-xs font-medium w-2/5" style={{ color: 'var(--text-muted)' }}>Access level</th>
+                          <th className="text-left px-4 py-2.5 text-xs font-medium" style={{ color: 'var(--text-muted)' }}>Stack restriction</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {matrix.rows.map((row, idx) => (
+                          <MatrixRowComp
+                            key={row.serverId || '__global__'}
+                            row={row}
+                            isGlobal={idx === 0}
+                            onChange={patch => patchRow(idx, patch)}
+                          />
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {servers.length === 0 && (
+                    <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
+                      No servers enrolled yet. Global access applies to all future servers.
+                    </p>
+                  )}
+                </div>
+              </>
             )}
           </div>
 
-          {/* Secrets Manager + Access Matrix — hidden when Admin is on */}
-          {matrix.admin ? (
-            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              Admins have full access to all servers, stacks and secrets.
-              Disable Admin to configure granular permissions.
-            </p>
-          ) : (
-            <>
-              {/* Secrets Manager */}
-              <SwitchRow
-                checked={matrix.secretsManager}
-                onChange={v => setMatrix(m => ({ ...m, secretsManager: v }))}
-                label="Secrets Manager"
-                description="Create, edit, reveal and delete secrets"
-              />
-
-              {/* Access matrix */}
-              <div>
-                <p className="text-xs font-medium mb-3 uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-                  Access Matrix
-                </p>
-                <div className="rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid var(--border)', backgroundColor: 'var(--surface-2)' }}>
-                        <th className="text-left px-4 py-2.5 text-xs font-medium w-1/4" style={{ color: 'var(--text-muted)' }}>Scope</th>
-                        <th className="text-left px-4 py-2.5 text-xs font-medium w-2/5" style={{ color: 'var(--text-muted)' }}>Access level</th>
-                        <th className="text-left px-4 py-2.5 text-xs font-medium" style={{ color: 'var(--text-muted)' }}>Stack restriction</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {matrix.rows.map((row, idx) => (
-                        <MatrixRowComp
-                          key={row.serverId || '__global__'}
-                          row={row}
-                          isGlobal={idx === 0}
-                          onChange={patch => patchRow(idx, patch)}
-                        />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {servers.length === 0 && (
-                  <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
-                    No servers enrolled yet. Global access applies to all future servers.
-                  </p>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div
-          className="flex justify-end gap-2 px-6 py-4 border-t shrink-0"
-          style={{ borderColor: 'var(--border)' }}
-        >
-          <button
-            onClick={onClose}
-            className="px-4 py-1.5 rounded border text-sm"
-            style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+          {/* Footer */}
+          <div
+            className="flex items-center justify-between gap-2 px-6 py-4 border-t shrink-0"
+            style={{ borderColor: 'var(--border)' }}
           >
-            Cancel
-          </button>
-          <button
-            onClick={save}
-            disabled={busy}
-            className="px-4 py-1.5 rounded text-sm font-medium disabled:opacity-50"
-            style={{ backgroundColor: 'var(--accent)', color: '#0d1117' }}
-          >
-            {busy ? 'Saving…' : 'Save permissions'}
-          </button>
+            {/* Delete link — hidden for self */}
+            <div>
+              {!isSelf && (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  className="text-sm"
+                  style={{ color: 'var(--error)' }}
+                >
+                  Delete user
+                </button>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={onClose}
+                className="px-4 py-1.5 rounded border text-sm"
+                style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={save}
+                disabled={busy}
+                className="px-4 py-1.5 rounded text-sm font-medium disabled:opacity-50"
+                style={{ backgroundColor: 'var(--accent)', color: '#0d1117' }}
+              >
+                {busy ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
+
+      {/* Delete confirmation dialog */}
+      {confirmDelete && (
+        <Modal title="Delete user" onClose={() => setConfirmDelete(false)}>
+          <p className="text-sm mb-1" style={{ color: 'var(--text)' }}>
+            Delete <strong>{user.username}</strong>?
+          </p>
+          <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>
+            This permanently removes the account and cannot be undone. Their sessions and role
+            assignments will be deleted; stacks and secrets they created are retained.
+          </p>
+          {error && <ErrorBar>{error}</ErrorBar>}
+          <div className="flex justify-end gap-2 mt-4">
+            <button
+              onClick={() => setConfirmDelete(false)}
+              className="px-4 py-1.5 rounded border text-sm"
+              style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={deleteUser}
+              disabled={busy}
+              className="px-4 py-1.5 rounded text-sm font-medium disabled:opacity-50"
+              style={{ backgroundColor: 'var(--error)', color: '#fff' }}
+            >
+              {busy ? 'Deleting…' : 'Delete'}
+            </button>
+          </div>
+        </Modal>
+      )}
+    </>
   )
 }
 
@@ -793,7 +900,7 @@ function SwitchRow({
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}>
+    <div className="fixed inset-0 flex items-center justify-center z-[60]" style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}>
       <div className="w-full max-w-md rounded-lg border p-6 relative" style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)' }}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-base" style={{ color: 'var(--text)' }}>{title}</h2>
