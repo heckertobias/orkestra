@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -25,12 +26,17 @@ const (
 	stateTTL        = 10 * time.Minute
 )
 
+// errNoAccount is returned by resolveOIDCUser when the IdP identity cannot be
+// matched to any pre-created orkestra account.
+var errNoAccount = errors.New("no matching orkestra account")
+
 // Provider wraps the OIDC verifier and OAuth2 config for the SSO login flow.
 type Provider struct {
-	mu       sync.RWMutex
-	verifier *gooidc.IDTokenVerifier
-	oauth2   *oauth2.Config
-	claims   map[string]string // claim value → role
+	mu          sync.RWMutex
+	verifier    *gooidc.IDTokenVerifier
+	oauth2      *oauth2.Config
+	claims      map[string]string // group value → role
+	groupsClaim string            // token claim that holds group membership (default: "groups")
 
 	db  *store.Queries
 	kek []byte
@@ -77,9 +83,14 @@ func (p *Provider) Reload(ctx context.Context, redirectURL string) error {
 		scopes = []string{gooidc.ScopeOpenID, "profile", "email"}
 	}
 
-	var claims map[string]string
+	var claimMapping map[string]string
 	if len(cfg.ClaimMapping) > 0 {
-		_ = json.Unmarshal(cfg.ClaimMapping, &claims)
+		_ = json.Unmarshal(cfg.ClaimMapping, &claimMapping)
+	}
+
+	groupsClaim := cfg.GroupsClaim
+	if groupsClaim == "" {
+		groupsClaim = "groups"
 	}
 
 	p.mu.Lock()
@@ -91,7 +102,8 @@ func (p *Provider) Reload(ctx context.Context, redirectURL string) error {
 		RedirectURL:  redirectURL,
 		Scopes:       scopes,
 	}
-	p.claims = claims
+	p.claims = claimMapping
+	p.groupsClaim = groupsClaim
 	p.mu.Unlock()
 	return nil
 }
@@ -126,13 +138,15 @@ func (p *Provider) LoginHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // CallbackHandler handles the IdP redirect (GET /auth/oidc/callback).
-// On success it creates/updates the user and sets a session cookie, then redirects to /.
+// On success it looks up the pre-existing user and sets a session cookie, then redirects to /.
+// Unknown users are redirected to /login?error=oidc_no_account.
 func (p *Provider) CallbackHandler(q *store.Queries, sessionTTL time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p.mu.RLock()
 		oauth2cfg := p.oauth2
 		verifier := p.verifier
 		claimMap := p.claims
+		groupsClaim := p.groupsClaim
 		p.mu.RUnlock()
 
 		if oauth2cfg == nil || verifier == nil {
@@ -170,8 +184,6 @@ func (p *Provider) CallbackHandler(q *store.Queries, sessionTTL time.Duration) h
 			Sub   string `json:"sub"`
 			Email string `json:"email"`
 			Name  string `json:"name"`
-			// Generic map for role claim lookups.
-			Extra map[string]interface{} `json:"-"`
 		}
 		if err := idToken.Claims(&claims); err != nil {
 			http.Error(w, "parse claims", http.StatusInternalServerError)
@@ -180,15 +192,41 @@ func (p *Provider) CallbackHandler(q *store.Queries, sessionTTL time.Duration) h
 		var allClaims map[string]interface{}
 		_ = idToken.Claims(&allClaims)
 
-		// Resolve role from claim mapping.
-		role := resolveRole(allClaims, claimMap)
+		// Resolve role from group claim mapping.
+		role := resolveRole(allClaims, groupsClaim, claimMap)
 
 		ctx := r.Context()
-		user, err := upsertOIDCUser(ctx, q, claims.Sub, claims.Email, claims.Name, role)
+		user, err := resolveOIDCUser(ctx, q, claims.Sub, claims.Email)
 		if err != nil {
-			slog.Error("oidc upsert user", "err", err)
+			if errors.Is(err, errNoAccount) {
+				slog.Info("oidc login rejected — no matching account", "email", claims.Email, "sub", claims.Sub)
+				http.Redirect(w, r, "/login?error=oidc_no_account", http.StatusFound)
+				return
+			}
+			slog.Error("oidc resolve user", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
+		}
+
+		// Idempotently ensure the resolved role binding exists.
+		if role != "" {
+			roleID := "role-" + role
+			bindings, _ := q.ListRoleBindingsByUser(ctx, user.ID)
+			hasRole := false
+			for _, b := range bindings {
+				if b.RoleID == roleID && b.ServerID == nil && b.StackID == nil {
+					hasRole = true
+					break
+				}
+			}
+			if !hasRole {
+				_, _ = q.InsertRoleBinding(ctx, store.InsertRoleBindingParams{
+					ID:        randomID(),
+					UserID:    user.ID,
+					RoleID:    roleID,
+					CreatedAt: time.Now().UnixMilli(),
+				})
+			}
 		}
 
 		// Create session.
@@ -215,55 +253,73 @@ func (p *Provider) CallbackHandler(q *store.Queries, sessionTTL time.Duration) h
 	}
 }
 
-func upsertOIDCUser(ctx context.Context, q *store.Queries, sub, email, name, role string) (store.User, error) {
-	username := email
-	if username == "" {
-		username = sub
-	}
-	displayName := name
-	if displayName == "" {
-		displayName = username
-	}
-
-	// Try to find by OIDC subject.
+// resolveOIDCUser finds the pre-created orkestra user matching the OIDC identity.
+// It first tries by oidc_subject, then by email (and links the subject on first match).
+// Returns errNoAccount if no matching, non-disabled user is found.
+func resolveOIDCUser(ctx context.Context, q *store.Queries, sub, email string) (store.User, error) {
+	// Fast path: already linked.
 	existing, err := q.GetUserByOIDCSubject(ctx, sub)
 	if err == nil {
 		return existing, nil
 	}
 
-	// Create new OIDC user.
-	user, err := q.InsertOIDCUser(ctx, store.InsertOIDCUserParams{
-		Username:    username,
-		DisplayName: &displayName,
-		OIDCSubject: sub,
-		CreatedAt:   time.Now().UnixMilli(),
-	})
-	if err != nil {
-		return store.User{}, fmt.Errorf("insert oidc user: %w", err)
+	// Match by email (username field holds the email address).
+	if email == "" {
+		return store.User{}, errNoAccount
+	}
+	user, err := q.GetUserByUsername(ctx, email)
+	if err != nil || user.Disabled {
+		return store.User{}, errNoAccount
 	}
 
-	// Assign role if mapped.
-	if role != "" {
-		_, _ = q.InsertRoleBinding(ctx, store.InsertRoleBindingParams{
-			ID:        randomID(),
-			UserID:    user.ID,
-			RoleID:    "role-" + role,
-			CreatedAt: time.Now().UnixMilli(),
-		})
+	// Link the OIDC subject for future fast-path lookups.
+	if err := q.SetOIDCSubject(ctx, user.ID, sub); err != nil {
+		slog.Warn("oidc: failed to link subject to user", "user_id", user.ID, "err", err)
 	}
+	user.OidcSubject = &sub
 	return user, nil
 }
 
-func resolveRole(claims map[string]interface{}, claimMap map[string]string) string {
-	for k, role := range claimMap {
-		if v, ok := claims[k]; ok {
-			if fmt.Sprintf("%v", v) != "" {
-				_ = v
-				return role
+// resolveRole reads the configured groups claim from the token, normalises it to
+// a string slice, and returns the highest-privilege role found in the mapping.
+// Privilege order: admin > operator > viewer.
+func resolveRole(claims map[string]interface{}, groupsClaim string, claimMap map[string]string) string {
+	if len(claimMap) == 0 || groupsClaim == "" {
+		return ""
+	}
+	raw, ok := claims[groupsClaim]
+	if !ok {
+		return ""
+	}
+
+	// Normalise: accept a single string or an array of strings/interfaces.
+	var groups []string
+	switch v := raw.(type) {
+	case string:
+		groups = []string{v}
+	case []string:
+		groups = v
+	case []interface{}:
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				groups = append(groups, s)
 			}
 		}
 	}
-	return ""
+
+	// Priority: admin > operator > viewer.
+	rolePriority := map[string]int{"admin": 3, "operator": 2, "viewer": 1}
+	best := ""
+	bestPrio := 0
+	for _, g := range groups {
+		if role, ok := claimMap[g]; ok {
+			if p := rolePriority[role]; p > bestPrio {
+				best = role
+				bestPrio = p
+			}
+		}
+	}
+	return best
 }
 
 func randomState() string {

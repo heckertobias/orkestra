@@ -64,14 +64,18 @@ export function Sidebar() {
       {user && (
         <div className="px-3 py-3 border-t" style={{ borderColor: 'var(--border)' }}>
           <div className="flex items-center justify-between gap-2">
-            <div className="min-w-0">
+            <NavLink
+              to="/profile"
+              className="min-w-0 flex-1 rounded px-1 py-0.5 hover:bg-[var(--surface-2)] transition-colors"
+              title="View profile & change password"
+            >
               <p className="text-xs font-medium truncate" style={{ color: 'var(--text)' }}>
                 {user.displayName || user.username}
               </p>
               <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>
                 {user.roles.join(', ') || 'no role'}
               </p>
-            </div>
+            </NavLink>
             <button
               onClick={handleLogout}
               className="p-1.5 rounded hover:bg-[var(--surface-2)] shrink-0"

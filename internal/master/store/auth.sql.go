@@ -367,6 +367,15 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const revokeAllSessionsForUser = `-- name: RevokeAllSessionsForUser :exec
+DELETE FROM sessions WHERE user_id = $1
+`
+
+func (q *Queries) RevokeAllSessionsForUser(ctx context.Context, userID string) error {
+	_, err := q.db.Exec(ctx, revokeAllSessionsForUser, userID)
+	return err
+}
+
 const revokeSession = `-- name: RevokeSession :exec
 UPDATE sessions SET revoked = true WHERE id = $1
 `

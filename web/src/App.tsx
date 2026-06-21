@@ -8,9 +8,12 @@ import { StacksPage } from './pages/StacksPage'
 import { StackDetailPage } from './pages/StackDetailPage'
 import { SecretsPage } from './pages/SecretsPage'
 import { LoginPage } from './pages/LoginPage'
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
+import { SetPasswordPage } from './pages/SetPasswordPage'
 import { UsersPage } from './pages/UsersPage'
 import { AuditLogPage } from './pages/AuditLogPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { ProfilePage } from './pages/ProfilePage'
 import { AuthProvider, useAuth } from './lib/auth'
 import { ToastProvider } from './components/ui/toast'
 
@@ -32,7 +35,11 @@ export default function App() {
         <AuthProvider>
           <ToastProvider>
             <Routes>
-              <Route path="login" element={<LoginPage />} />
+              {/* Public routes — no auth required */}
+              <Route path="login"            element={<LoginPage />} />
+              <Route path="forgot-password"  element={<ForgotPasswordPage />} />
+              <Route path="set-password"     element={<SetPasswordPage />} />
+              {/* Authenticated routes */}
               <Route element={<AuthGuard><Layout /></AuthGuard>}>
                 <Route index element={<DashboardPage />} />
                 <Route path="servers" element={<ServersPage />} />
@@ -43,6 +50,7 @@ export default function App() {
                 <Route path="users"    element={<UsersPage />} />
                 <Route path="audit"    element={<AuditLogPage />} />
                 <Route path="settings" element={<SettingsPage />} />
+                <Route path="profile"  element={<ProfilePage />} />
               </Route>
             </Routes>
           </ToastProvider>

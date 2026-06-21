@@ -22,6 +22,9 @@ type Querier interface {
 	GetLatestStackVersion(ctx context.Context, stackID string) (StackVersion, error)
 	GetNextVersionNumber(ctx context.Context, stackID string) (int32, error)
 	GetOIDCConfig(ctx context.Context) (OidcConfig, error)
+	GetPasswordPolicy(ctx context.Context) (PasswordPolicy, error)
+	GetPasswordResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
+	GetSMTPConfig(ctx context.Context) (SmtpConfig, error)
 	GetSecret(ctx context.Context, id string) (Secret, error)
 	GetServer(ctx context.Context, id string) (Server, error)
 	GetSession(ctx context.Context, arg GetSessionParams) (Session, error)
@@ -38,6 +41,7 @@ type Querier interface {
 	InsertCertificate(ctx context.Context, arg InsertCertificateParams) error
 	InsertEnrollmentToken(ctx context.Context, arg InsertEnrollmentTokenParams) (EnrollmentToken, error)
 	InsertEvent(ctx context.Context, arg InsertEventParams) error
+	InsertPasswordResetToken(ctx context.Context, arg InsertPasswordResetTokenParams) error
 	InsertRoleBinding(ctx context.Context, arg InsertRoleBindingParams) (RoleBinding, error)
 	InsertSecret(ctx context.Context, arg InsertSecretParams) (Secret, error)
 	InsertServer(ctx context.Context, arg InsertServerParams) (Server, error)
@@ -62,7 +66,9 @@ type Querier interface {
 	ListStacks(ctx context.Context) ([]Stack, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	MarkOfflineServers(ctx context.Context, lastSeenAt *int64) error
+	MarkPasswordResetTokenUsed(ctx context.Context, arg MarkPasswordResetTokenUsedParams) error
 	RevokeAPIKey(ctx context.Context, id string) error
+	RevokeAllSessionsForUser(ctx context.Context, userID string) error
 	RevokeCertificate(ctx context.Context, arg RevokeCertificateParams) error
 	RevokeEnrollmentToken(ctx context.Context, id string) error
 	RevokeSession(ctx context.Context, id string) error
@@ -78,6 +84,8 @@ type Querier interface {
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpsertAssignment(ctx context.Context, arg UpsertAssignmentParams) (Assignment, error)
 	UpsertOIDCConfig(ctx context.Context, arg UpsertOIDCConfigParams) (OidcConfig, error)
+	UpsertPasswordPolicy(ctx context.Context, arg UpsertPasswordPolicyParams) (PasswordPolicy, error)
+	UpsertSMTPConfig(ctx context.Context, arg UpsertSMTPConfigParams) (SmtpConfig, error)
 }
 
 var _ Querier = (*Queries)(nil)

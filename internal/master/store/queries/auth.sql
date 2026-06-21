@@ -40,6 +40,9 @@ UPDATE sessions SET last_seen = $2 WHERE id = $1;
 -- name: RevokeSession :exec
 UPDATE sessions SET revoked = true WHERE id = $1;
 
+-- name: RevokeAllSessionsForUser :exec
+DELETE FROM sessions WHERE user_id = $1;
+
 -- name: ListRoleBindingsByUser :many
 SELECT * FROM role_bindings WHERE user_id = $1 ORDER BY created_at;
 

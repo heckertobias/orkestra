@@ -14,6 +14,7 @@ export interface AuthUser {
   roles: string[]        // global role names (display only)
   bindings: RoleBinding[] // full binding list for RBAC gating
   hasPassword: boolean
+  hasOidc: boolean
 }
 
 interface AuthCtx {
@@ -58,6 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             stackId:  String(b.stackId ?? b.stack_id ?? ''),
           })),
           hasPassword: Boolean(data.hasPassword ?? data.has_password ?? false),
+          hasOidc:     Boolean(data.hasOidc ?? data.has_oidc ?? false),
         })
       } else {
         setUser(null)

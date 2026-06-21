@@ -10,7 +10,7 @@ import (
 )
 
 const getOIDCConfig = `-- name: GetOIDCConfig :one
-SELECT id, issuer_url, client_id, client_secret_enc, scopes, claim_mapping, enabled, updated_at FROM oidc_config LIMIT 1
+SELECT id, issuer_url, client_id, client_secret_enc, scopes, claim_mapping, enabled, updated_at, groups_claim FROM oidc_config LIMIT 1
 `
 
 func (q *Queries) GetOIDCConfig(ctx context.Context) (OidcConfig, error) {
@@ -25,13 +25,14 @@ func (q *Queries) GetOIDCConfig(ctx context.Context) (OidcConfig, error) {
 		&i.ClaimMapping,
 		&i.Enabled,
 		&i.UpdatedAt,
+		&i.GroupsClaim,
 	)
 	return i, err
 }
 
 const upsertOIDCConfig = `-- name: UpsertOIDCConfig :one
-INSERT INTO oidc_config (id, issuer_url, client_id, client_secret_enc, scopes, claim_mapping, enabled, updated_at)
-VALUES (1, $1, $2, $3, $4, $5, $6, $7)
+INSERT INTO oidc_config (id, issuer_url, client_id, client_secret_enc, scopes, claim_mapping, enabled, groups_claim, updated_at)
+VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (id) DO UPDATE SET
     issuer_url        = excluded.issuer_url,
     client_id         = excluded.client_id,
@@ -39,8 +40,9 @@ ON CONFLICT (id) DO UPDATE SET
     scopes            = excluded.scopes,
     claim_mapping     = excluded.claim_mapping,
     enabled           = excluded.enabled,
+    groups_claim      = excluded.groups_claim,
     updated_at        = excluded.updated_at
-RETURNING id, issuer_url, client_id, client_secret_enc, scopes, claim_mapping, enabled, updated_at
+RETURNING id, issuer_url, client_id, client_secret_enc, scopes, claim_mapping, enabled, updated_at, groups_claim
 `
 
 type UpsertOIDCConfigParams struct {
@@ -50,6 +52,7 @@ type UpsertOIDCConfigParams struct {
 	Scopes          []byte `json:"scopes"`
 	ClaimMapping    []byte `json:"claim_mapping"`
 	Enabled         bool   `json:"enabled"`
+	GroupsClaim     string `json:"groups_claim"`
 	UpdatedAt       int64  `json:"updated_at"`
 }
 
@@ -61,6 +64,7 @@ func (q *Queries) UpsertOIDCConfig(ctx context.Context, arg UpsertOIDCConfigPara
 		arg.Scopes,
 		arg.ClaimMapping,
 		arg.Enabled,
+		arg.GroupsClaim,
 		arg.UpdatedAt,
 	)
 	var i OidcConfig
@@ -73,6 +77,7 @@ func (q *Queries) UpsertOIDCConfig(ctx context.Context, arg UpsertOIDCConfigPara
 		&i.ClaimMapping,
 		&i.Enabled,
 		&i.UpdatedAt,
+		&i.GroupsClaim,
 	)
 	return i, err
 }

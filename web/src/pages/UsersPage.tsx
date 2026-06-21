@@ -231,14 +231,14 @@ export function UsersPage() {
   useEffect(() => { load() }, [])
 
   async function createUser() {
-    if (!form.username || !form.password) { setFormError('Username and password required'); return }
+    if (!form.username) { setFormError('Email address required'); return }
     setBusy(true)
     setFormError(null)
     try {
       const res = await fetch('/orkestra.v1.AuthService/CreateUser', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: form.username, displayName: form.displayName, password: form.password }),
+        body: JSON.stringify({ username: form.username, displayName: form.displayName }),
       })
       if (!res.ok) throw new Error(apiError(await res.text()))
       setShowCreate(false)
@@ -280,7 +280,7 @@ export function UsersPage() {
         <table className="w-full text-sm">
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['Username', 'Display name', 'Roles', 'Status', 'Last login', ''].map(h => (
+              {['Email', 'Display name', 'Roles', 'Status', 'Last login', ''].map(h => (
                 <th key={h} className="text-left px-4 py-3 text-xs font-medium" style={{ color: 'var(--text-muted)' }}>{h}</th>
               ))}
             </tr>
@@ -338,28 +338,22 @@ export function UsersPage() {
         <Modal title="New User" onClose={() => { setShowCreate(false); setFormError(null) }}>
           {formError && <ErrorBar>{formError}</ErrorBar>}
           <div className="space-y-3">
-            <Field label="Username *">
+            <Field label="Email address *">
               <input
+                type="email"
                 value={form.username}
                 onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
-                className={inputCls} style={inputStyle} placeholder="jsmith"
+                className={inputCls} style={inputStyle} placeholder="user@example.com"
               />
             </Field>
             <Field label="Display name">
               <input
                 value={form.displayName}
                 onChange={e => setForm(f => ({ ...f, displayName: e.target.value }))}
-                className={inputCls} style={inputStyle} placeholder="John Smith"
+                className={inputCls} style={inputStyle} placeholder="Jane Smith"
               />
             </Field>
-            <Field label="Password *">
-              <input
-                type="password"
-                value={form.password}
-                onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-                className={inputCls} style={inputStyle}
-              />
-            </Field>
+            <InfoBar>An invite email will be sent so the user can set their own password.</InfoBar>
           </div>
           <div className="flex justify-end gap-2 mt-4">
             <button

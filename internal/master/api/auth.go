@@ -5,10 +5,12 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/mail"
 	"time"
 
 	"connectrpc.com/connect"
@@ -16,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	masterauth "github.com/heckertobias/orkestra/internal/master/auth"
+	"github.com/heckertobias/orkestra/internal/master/email"
 	"github.com/heckertobias/orkestra/internal/master/pki"
 	"github.com/heckertobias/orkestra/internal/master/store"
 	orkestraV1 "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1"
@@ -29,11 +32,12 @@ type AuthServiceHandler struct {
 	q          *store.Queries
 	kek        []byte
 	setupToken *string // non-nil when first-run setup is pending
+	mailer     *email.Mailer
 }
 
 // NewAuthServiceHandler constructs an AuthServiceHandler.
-func NewAuthServiceHandler(db *pgxpool.Pool, kek []byte, setupToken *string) *AuthServiceHandler {
-	return &AuthServiceHandler{db: db, q: store.New(db), kek: kek, setupToken: setupToken}
+func NewAuthServiceHandler(db *pgxpool.Pool, kek []byte, setupToken *string, mailer *email.Mailer) *AuthServiceHandler {
+	return &AuthServiceHandler{db: db, q: store.New(db), kek: kek, setupToken: setupToken, mailer: mailer}
 }
 
 // AuditLogHTTPHandler returns audit log entries as JSON (GET /api/audit).
@@ -265,31 +269,47 @@ func (h *AuthServiceHandler) ListUsers(ctx context.Context, _ *connect.Request[o
 }
 
 // CreateUser creates a new user (admin only).
+// The username must be a valid email address. No password is set; the user
+// receives an invite email with a link to set their own password.
 func (h *AuthServiceHandler) CreateUser(ctx context.Context, req *connect.Request[orkestraV1.CreateUserRequest]) (*connect.Response[orkestraV1.User], error) {
 	if err := requireRole(ctx, "admin"); err != nil {
 		return nil, err
 	}
 	r := req.Msg
-	if r.Username == "" || r.Password == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("username and password required"))
+	if r.Username == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("email (username) required"))
 	}
-	hash, err := masterauth.HashPassword(r.Password)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("hash password: %w", err))
+	if _, err := mail.ParseAddress(r.Username); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("username must be a valid email address"))
 	}
 	row, err := h.q.InsertUser(ctx, store.InsertUserParams{
-		ID:           uuid.NewString(),
-		Username:     r.Username,
-		DisplayName:  ptrString(r.DisplayName),
-		PasswordHash: &hash,
-		Disabled:     false,
-		CreatedAt:    time.Now().UnixMilli(),
+		ID:          uuid.NewString(),
+		Username:    r.Username,
+		DisplayName: ptrString(r.DisplayName),
+		// PasswordHash is nil — user must set password via invite link
+		Disabled:  false,
+		CreatedAt: time.Now().UnixMilli(),
 	})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("create user: %w", err))
 	}
 	actor := masterauth.UserFromContext(ctx)
 	h.auditAuth(ctx, nil, "user.create", ptrString(fmt.Sprintf("actor=%s target=%s", actor.Username, row.Username)))
+
+	// Generate and email an invite token.
+	rawToken, tokenHash := generateResetToken()
+	now := time.Now()
+	_ = h.q.InsertPasswordResetToken(ctx, store.InsertPasswordResetTokenParams{
+		ID:        uuid.NewString(),
+		UserID:    row.ID,
+		TokenHash: tokenHash,
+		Purpose:   "invite",
+		ExpiresAt: now.Add(72 * time.Hour).UnixMilli(),
+		CreatedAt: now.UnixMilli(),
+	})
+	link := h.publicURL(req.Header()) + "/set-password?token=" + rawToken
+	h.mailer.SendInvite(ctx, r.Username, link)
+
 	return connect.NewResponse(userToProto(row, nil, nil)), nil
 }
 
@@ -343,6 +363,12 @@ func (h *AuthServiceHandler) DeleteUser(ctx context.Context, req *connect.Reques
 // ResetPassword sets a new password for a user (admin only).
 func (h *AuthServiceHandler) ResetPassword(ctx context.Context, req *connect.Request[orkestraV1.ResetPasswordRequest]) (*connect.Response[orkestraV1.AuthEmpty], error) {
 	if err := requireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
+	if req.Msg.NewPassword == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("new_password required"))
+	}
+	if err := h.validatePassword(ctx, req.Msg.NewPassword); err != nil {
 		return nil, err
 	}
 	hash, err := masterauth.HashPassword(req.Msg.NewPassword)
@@ -426,6 +452,217 @@ func (h *AuthServiceHandler) RevokeRole(ctx context.Context, req *connect.Reques
 	return connect.NewResponse(&orkestraV1.AuthEmpty{}), nil
 }
 
+// ChangePassword lets an authenticated user change their own password.
+func (h *AuthServiceHandler) ChangePassword(ctx context.Context, req *connect.Request[orkestraV1.ChangePasswordRequest]) (*connect.Response[orkestraV1.AuthEmpty], error) {
+	u := masterauth.UserFromContext(ctx)
+	if u == nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("not authenticated"))
+	}
+	r := req.Msg
+	if r.CurrentPassword == "" || r.NewPassword == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("current_password and new_password required"))
+	}
+	user, err := h.q.GetUser(ctx, u.ID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
+	}
+	if user.PasswordHash == nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("account uses SSO — no local password to change"))
+	}
+	if !masterauth.VerifyPassword(*user.PasswordHash, r.CurrentPassword) {
+		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("current password is incorrect"))
+	}
+	if err := h.validatePassword(ctx, r.NewPassword); err != nil {
+		return nil, err
+	}
+	hash, err := masterauth.HashPassword(r.NewPassword)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("hash password: %w", err))
+	}
+	if err := h.q.SetPasswordHash(ctx, store.SetPasswordHashParams{ID: u.ID, PasswordHash: &hash}); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("set password: %w", err))
+	}
+	h.auditAuth(ctx, &user, "auth.change_password", nil)
+	return connect.NewResponse(&orkestraV1.AuthEmpty{}), nil
+}
+
+// RequestPasswordReset sends a password-reset email.
+// Always returns OK (never reveals whether the email exists).
+func (h *AuthServiceHandler) RequestPasswordReset(ctx context.Context, req *connect.Request[orkestraV1.RequestPasswordResetRequest]) (*connect.Response[orkestraV1.AuthEmpty], error) {
+	em := req.Msg.Email
+	if em == "" {
+		return connect.NewResponse(&orkestraV1.AuthEmpty{}), nil
+	}
+	go func() {
+		user, err := h.q.GetUserByUsername(context.Background(), em)
+		if err != nil || user.Disabled || user.PasswordHash == nil && user.OidcSubject != nil {
+			return // silently drop: unknown, disabled, or OIDC-only account
+		}
+		rawToken, tokenHash := generateResetToken()
+		now := time.Now()
+		_ = h.q.InsertPasswordResetToken(context.Background(), store.InsertPasswordResetTokenParams{
+			ID:        uuid.NewString(),
+			UserID:    user.ID,
+			TokenHash: tokenHash,
+			Purpose:   "reset",
+			ExpiresAt: now.Add(time.Hour).UnixMilli(),
+			CreatedAt: now.UnixMilli(),
+		})
+		link := h.publicURL(req.Header()) + "/set-password?token=" + rawToken
+		h.mailer.SendPasswordReset(context.Background(), em, link)
+	}()
+	return connect.NewResponse(&orkestraV1.AuthEmpty{}), nil
+}
+
+// ResetPasswordWithToken validates a password-reset or invite token and sets the new password.
+func (h *AuthServiceHandler) ResetPasswordWithToken(ctx context.Context, req *connect.Request[orkestraV1.ResetPasswordWithTokenRequest]) (*connect.Response[orkestraV1.AuthEmpty], error) {
+	r := req.Msg
+	if r.Token == "" || r.NewPassword == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("token and new_password required"))
+	}
+	tokenHash := hashResetToken(r.Token)
+	record, err := h.q.GetPasswordResetTokenByHash(ctx, tokenHash)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("invalid or expired token"))
+	}
+	if record.UsedAt != nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("token already used"))
+	}
+	if time.Now().UnixMilli() > record.ExpiresAt {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("token expired"))
+	}
+	if err := h.validatePassword(ctx, r.NewPassword); err != nil {
+		return nil, err
+	}
+	hash, err := masterauth.HashPassword(r.NewPassword)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("hash password: %w", err))
+	}
+	if err := h.q.SetPasswordHash(ctx, store.SetPasswordHashParams{
+		ID:           record.UserID,
+		PasswordHash: &hash,
+	}); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("set password: %w", err))
+	}
+	now := time.Now().UnixMilli()
+	_ = h.q.MarkPasswordResetTokenUsed(ctx, store.MarkPasswordResetTokenUsedParams{
+		ID:     record.ID,
+		UsedAt: &now,
+	})
+	// Invalidate all existing sessions after a password reset.
+	_ = h.q.RevokeAllSessionsForUser(ctx, record.UserID)
+	return connect.NewResponse(&orkestraV1.AuthEmpty{}), nil
+}
+
+// GetPasswordPolicy returns the current password policy (admin only).
+func (h *AuthServiceHandler) GetPasswordPolicy(ctx context.Context, _ *connect.Request[orkestraV1.AuthEmpty]) (*connect.Response[orkestraV1.PasswordPolicy], error) {
+	if err := requireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
+	p, err := h.q.GetPasswordPolicy(ctx)
+	if err != nil {
+		return connect.NewResponse(&orkestraV1.PasswordPolicy{}), nil // no policy yet
+	}
+	return connect.NewResponse(policyToProto(p)), nil
+}
+
+// UpdatePasswordPolicy saves the password policy (admin only).
+func (h *AuthServiceHandler) UpdatePasswordPolicy(ctx context.Context, req *connect.Request[orkestraV1.PasswordPolicy]) (*connect.Response[orkestraV1.PasswordPolicy], error) {
+	if err := requireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
+	r := req.Msg
+	p, err := h.q.UpsertPasswordPolicy(ctx, store.UpsertPasswordPolicyParams{
+		MinLength:  int32(r.MinLength),
+		SpecialMin: int32(r.SpecialMin),
+		SpecialMax: int32(r.SpecialMax),
+		DigitMin:   int32(r.DigitMin),
+		DigitMax:   int32(r.DigitMax),
+		UpperMin:   int32(r.UpperMin),
+		UpperMax:   int32(r.UpperMax),
+		LowerMin:   int32(r.LowerMin),
+		LowerMax:   int32(r.LowerMax),
+		UpdatedAt:  time.Now().UnixMilli(),
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("save policy: %w", err))
+	}
+	return connect.NewResponse(policyToProto(p)), nil
+}
+
+// GetSMTPConfig returns the current SMTP configuration (admin only).
+func (h *AuthServiceHandler) GetSMTPConfig(ctx context.Context, _ *connect.Request[orkestraV1.AuthEmpty]) (*connect.Response[orkestraV1.SMTPConfig], error) {
+	if err := requireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
+	cfg, err := h.q.GetSMTPConfig(ctx)
+	if err != nil {
+		return connect.NewResponse(&orkestraV1.SMTPConfig{Port: 587, Starttls: true}), nil
+	}
+	return connect.NewResponse(&orkestraV1.SMTPConfig{
+		Enabled:     cfg.Enabled,
+		Host:        cfg.Host,
+		Port:        int32(cfg.Port),
+		Username:    cfg.Username,
+		FromAddress: cfg.FromAddress,
+		PublicUrl:   cfg.PublicUrl,
+		Starttls:    cfg.Starttls,
+		// password not returned (write-only)
+	}), nil
+}
+
+// UpdateSMTPConfig saves the SMTP configuration (admin only).
+func (h *AuthServiceHandler) UpdateSMTPConfig(ctx context.Context, req *connect.Request[orkestraV1.UpdateSMTPConfigRequest]) (*connect.Response[orkestraV1.SMTPConfig], error) {
+	if err := requireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
+	r := req.Msg
+
+	// Encrypt the password with KEK (keep existing if blank).
+	passwordEnc := ""
+	if r.Password != "" {
+		enc, err := pki.Encrypt(h.kek, []byte(r.Password))
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("encrypt password: %w", err))
+		}
+		passwordEnc = base64.StdEncoding.EncodeToString(enc)
+	} else {
+		existing, err := h.q.GetSMTPConfig(ctx)
+		if err == nil {
+			passwordEnc = existing.PasswordEnc
+		}
+	}
+
+	port := int32(r.Port)
+	if port == 0 {
+		port = 587
+	}
+
+	cfg, err := h.q.UpsertSMTPConfig(ctx, store.UpsertSMTPConfigParams{
+		Enabled:     r.Enabled,
+		Host:        r.Host,
+		Port:        port,
+		Username:    r.Username,
+		PasswordEnc: passwordEnc,
+		FromAddress: r.FromAddress,
+		PublicUrl:   r.PublicUrl,
+		Starttls:    r.Starttls,
+		UpdatedAt:   time.Now().UnixMilli(),
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("save smtp config: %w", err))
+	}
+	return connect.NewResponse(&orkestraV1.SMTPConfig{
+		Enabled:     cfg.Enabled,
+		Host:        cfg.Host,
+		Port:        int32(cfg.Port),
+		Username:    cfg.Username,
+		FromAddress: cfg.FromAddress,
+		PublicUrl:   cfg.PublicUrl,
+		Starttls:    cfg.Starttls,
+	}), nil
+}
+
 // GetOIDCConfig returns the current OIDC configuration.
 func (h *AuthServiceHandler) GetOIDCConfig(ctx context.Context, _ *connect.Request[orkestraV1.AuthEmpty]) (*connect.Response[orkestraV1.OIDCConfig], error) {
 	if err := requireRole(ctx, "admin"); err != nil {
@@ -446,6 +683,7 @@ func (h *AuthServiceHandler) GetOIDCConfig(ctx context.Context, _ *connect.Reque
 		ClientId:     cfg.ClientID,
 		Scopes:       scopes,
 		ClaimMapping: claimMapping,
+		GroupsClaim:  cfg.GroupsClaim,
 	}), nil
 }
 
@@ -479,6 +717,11 @@ func (h *AuthServiceHandler) UpdateOIDCConfig(ctx context.Context, req *connect.
 	scopesJSON, _ := json.Marshal(scopes)
 	claimJSON, _ := json.Marshal(r.ClaimMapping)
 
+	groupsClaim := r.GroupsClaim
+	if groupsClaim == "" {
+		groupsClaim = "groups"
+	}
+
 	cfg, err := h.q.UpsertOIDCConfig(ctx, store.UpsertOIDCConfigParams{
 		IssuerUrl:       r.IssuerUrl,
 		ClientID:        r.ClientId,
@@ -486,6 +729,7 @@ func (h *AuthServiceHandler) UpdateOIDCConfig(ctx context.Context, req *connect.
 		Scopes:          scopesJSON,
 		ClaimMapping:    claimJSON,
 		Enabled:         r.Enabled,
+		GroupsClaim:     groupsClaim,
 		UpdatedAt:       time.Now().UnixMilli(),
 	})
 	if err != nil {
@@ -494,14 +738,15 @@ func (h *AuthServiceHandler) UpdateOIDCConfig(ctx context.Context, req *connect.
 
 	var respScopes []string
 	_ = json.Unmarshal(cfg.Scopes, &respScopes)
-	var claimMapping map[string]string
-	_ = json.Unmarshal(cfg.ClaimMapping, &claimMapping)
+	var respClaimMapping map[string]string
+	_ = json.Unmarshal(cfg.ClaimMapping, &respClaimMapping)
 	return connect.NewResponse(&orkestraV1.OIDCConfig{
 		Enabled:      cfg.Enabled,
 		IssuerUrl:    cfg.IssuerUrl,
 		ClientId:     cfg.ClientID,
 		Scopes:       respScopes,
-		ClaimMapping: claimMapping,
+		ClaimMapping: respClaimMapping,
+		GroupsClaim:  cfg.GroupsClaim,
 	}), nil
 }
 
@@ -725,6 +970,66 @@ func apiKeyToProto(k store.ApiKey, rawKey string) *orkestraV1.APIKey {
 		p.ExpiresAt = *k.ExpiresAt
 	}
 	return p
+}
+
+// validatePassword checks pw against the stored policy (no-op if no policy is configured).
+func (h *AuthServiceHandler) validatePassword(ctx context.Context, pw string) error {
+	policy, err := h.q.GetPasswordPolicy(ctx)
+	if err != nil {
+		return nil // no policy configured — all passwords accepted
+	}
+	if err := masterauth.ValidatePassword(policy, pw); err != nil {
+		return connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	return nil
+}
+
+// publicURL derives the base URL for email links from the SMTP config or the request Host header.
+func (h *AuthServiceHandler) publicURL(header http.Header) string {
+	cfg, err := h.q.GetSMTPConfig(context.Background())
+	if err == nil && cfg.PublicUrl != "" {
+		return cfg.PublicUrl
+	}
+	host := header.Get("X-Forwarded-Host")
+	if host == "" {
+		host = header.Get("Host")
+	}
+	if host == "" {
+		return "http://localhost:8080"
+	}
+	return "http://" + host
+}
+
+// generateResetToken returns a (rawToken, tokenHash) pair for password-reset/invite flows.
+// rawToken is sent to the user; only tokenHash is stored in the DB.
+func generateResetToken() (rawToken, tokenHash string) {
+	b := make([]byte, 32)
+	_, _ = rand.Read(b)
+	rawToken = base64.URLEncoding.EncodeToString(b)
+	sum := sha256.Sum256([]byte(rawToken))
+	tokenHash = hex.EncodeToString(sum[:])
+	return rawToken, tokenHash
+}
+
+// hashResetToken derives the DB key from a raw reset token.
+func hashResetToken(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
+}
+
+// policyToProto converts a store.PasswordPolicy to the proto message.
+func policyToProto(p store.PasswordPolicy) *orkestraV1.PasswordPolicy {
+	return &orkestraV1.PasswordPolicy{
+		MinLength:  int32(p.MinLength),
+		SpecialMin: int32(p.SpecialMin),
+		SpecialMax: int32(p.SpecialMax),
+		DigitMin:   int32(p.DigitMin),
+		DigitMax:   int32(p.DigitMax),
+		UpperMin:   int32(p.UpperMin),
+		UpperMax:   int32(p.UpperMax),
+		LowerMin:   int32(p.LowerMin),
+		LowerMax:   int32(p.LowerMax),
+	}
 }
 
 func (h *AuthServiceHandler) auditAuth(ctx context.Context, user *store.User, action string, detail *string) {

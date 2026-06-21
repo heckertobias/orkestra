@@ -17,6 +17,11 @@ service AuthService {
   rpc DeleteUser(DeleteUserRequest)       returns (AuthEmpty);
   rpc ResetPassword(ResetPasswordRequest) returns (AuthEmpty);
 
+  // Self-service password management (authenticated user)
+  rpc ChangePassword(ChangePasswordRequest)                     returns (AuthEmpty);
+  rpc RequestPasswordReset(RequestPasswordResetRequest)         returns (AuthEmpty);
+  rpc ResetPasswordWithToken(ResetPasswordWithTokenRequest)     returns (AuthEmpty);
+
   // Role bindings (admin)
   rpc ListRoleBindings(ListRoleBindingsRequest) returns (ListRoleBindingsResponse);
   rpc AssignRole(AssignRoleRequest)             returns (RoleBinding);
@@ -25,6 +30,14 @@ service AuthService {
   // OIDC config (admin)
   rpc GetOIDCConfig(AuthEmpty)                  returns (OIDCConfig);
   rpc UpdateOIDCConfig(UpdateOIDCConfigRequest) returns (OIDCConfig);
+
+  // Password policy (admin)
+  rpc GetPasswordPolicy(AuthEmpty)                    returns (PasswordPolicy);
+  rpc UpdatePasswordPolicy(PasswordPolicy)            returns (PasswordPolicy);
+
+  // SMTP config (admin)
+  rpc GetSMTPConfig(AuthEmpty)                  returns (SMTPConfig);
+  rpc UpdateSMTPConfig(UpdateSMTPConfigRequest) returns (SMTPConfig);
 
   // Enrollment tokens (admin/operator)
   rpc ListEnrollmentTokens(AuthEmpty)                      returns (ListEnrollmentTokensResponse);
@@ -66,9 +79,9 @@ message ListUsersResponse { repeated User users = 1; }
 message DeleteUserRequest { string id = 1; }
 
 message CreateUserRequest {
-  string username     = 1;
+  string username     = 1; // must be a valid email address
   string display_name = 2;
-  string password     = 3;
+  // password field removed — users set their own password via invite link
 }
 
 message UpdateUserRequest {
@@ -80,6 +93,56 @@ message UpdateUserRequest {
 message ResetPasswordRequest {
   string user_id      = 1;
   string new_password = 2;
+}
+
+message ChangePasswordRequest {
+  string current_password = 1;
+  string new_password     = 2;
+}
+
+message RequestPasswordResetRequest {
+  string email = 1;
+}
+
+message ResetPasswordWithTokenRequest {
+  string token        = 1;
+  string new_password = 2;
+}
+
+// PasswordPolicy defines rules for internal users only.
+// min=0 means no minimum; max=0 means unlimited.
+message PasswordPolicy {
+  int32 min_length   = 1;
+  int32 special_min  = 2;
+  int32 special_max  = 3;
+  int32 digit_min    = 4;
+  int32 digit_max    = 5;
+  int32 upper_min    = 6;
+  int32 upper_max    = 7;
+  int32 lower_min    = 8;
+  int32 lower_max    = 9;
+}
+
+message SMTPConfig {
+  bool   enabled      = 1;
+  string host         = 2;
+  int32  port         = 3;
+  string username     = 4;
+  // password not returned; write-only via UpdateSMTPConfig
+  string from_address = 5;
+  string public_url   = 6; // base URL for email links (e.g. https://orkestra.example.com)
+  bool   starttls     = 7;
+}
+
+message UpdateSMTPConfigRequest {
+  bool   enabled      = 1;
+  string host         = 2;
+  int32  port         = 3;
+  string username     = 4;
+  string password     = 5; // write-only; leave blank to keep existing
+  string from_address = 6;
+  string public_url   = 7;
+  bool   starttls     = 8;
 }
 
 message RoleBinding {
@@ -109,7 +172,9 @@ message OIDCConfig {
   string client_id      = 3;
   // client_secret is write-only; not returned
   repeated string scopes = 4;
-  map<string, string> claim_mapping = 5; // claim value → role
+  // claim_mapping: group value → orkestra role (e.g. "ork-admins" → "admin")
+  map<string, string> claim_mapping = 5;
+  string groups_claim   = 6; // which token claim holds groups (default: "groups")
 }
 
 message UpdateOIDCConfigRequest {
@@ -119,6 +184,7 @@ message UpdateOIDCConfigRequest {
   string client_secret  = 4; // write-only
   repeated string scopes = 5;
   map<string, string> claim_mapping = 6;
+  string groups_claim   = 7;
 }
 
 message EnrollmentToken {

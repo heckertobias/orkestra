@@ -97,6 +97,31 @@ type OidcConfig struct {
 	ClaimMapping    []byte `json:"claim_mapping"`
 	Enabled         bool   `json:"enabled"`
 	UpdatedAt       int64  `json:"updated_at"`
+	GroupsClaim     string `json:"groups_claim"`
+}
+
+type PasswordPolicy struct {
+	ID         int32 `json:"id"`
+	MinLength  int32 `json:"min_length"`
+	SpecialMin int32 `json:"special_min"`
+	SpecialMax int32 `json:"special_max"`
+	DigitMin   int32 `json:"digit_min"`
+	DigitMax   int32 `json:"digit_max"`
+	UpperMin   int32 `json:"upper_min"`
+	UpperMax   int32 `json:"upper_max"`
+	LowerMin   int32 `json:"lower_min"`
+	LowerMax   int32 `json:"lower_max"`
+	UpdatedAt  int64 `json:"updated_at"`
+}
+
+type PasswordResetToken struct {
+	ID        string `json:"id"`
+	UserID    string `json:"user_id"`
+	TokenHash string `json:"token_hash"`
+	Purpose   string `json:"purpose"`
+	ExpiresAt int64  `json:"expires_at"`
+	UsedAt    *int64 `json:"used_at"`
+	CreatedAt int64  `json:"created_at"`
 }
 
 type Role struct {
@@ -164,6 +189,19 @@ type Session struct {
 	IpAddress *string `json:"ip_address"`
 	UserAgent *string `json:"user_agent"`
 	Revoked   bool    `json:"revoked"`
+}
+
+type SmtpConfig struct {
+	ID          int32  `json:"id"`
+	Enabled     bool   `json:"enabled"`
+	Host        string `json:"host"`
+	Port        int32  `json:"port"`
+	Username    string `json:"username"`
+	PasswordEnc string `json:"password_enc"`
+	FromAddress string `json:"from_address"`
+	PublicUrl   string `json:"public_url"`
+	Starttls    bool   `json:"starttls"`
+	UpdatedAt   int64  `json:"updated_at"`
 }
 
 type Stack struct {

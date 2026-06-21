@@ -19,6 +19,7 @@ import (
 	"github.com/heckertobias/orkestra/internal/master/agentgw"
 	masterapi "github.com/heckertobias/orkestra/internal/master/api"
 	masterauth "github.com/heckertobias/orkestra/internal/master/auth"
+	masteremail "github.com/heckertobias/orkestra/internal/master/email"
 	"github.com/heckertobias/orkestra/internal/master/keys"
 	masteroidc "github.com/heckertobias/orkestra/internal/master/oidc"
 	"github.com/heckertobias/orkestra/internal/master/pki"
@@ -31,7 +32,9 @@ import (
 
 // publicProcedures lists Connect RPC procedures that do not require a session.
 var publicProcedures = map[string]bool{
-	orkestrav1connect.AuthServiceLoginProcedure: true,
+	orkestrav1connect.AuthServiceLoginProcedure:              true,
+	orkestrav1connect.AuthServiceRequestPasswordResetProcedure: true,
+	orkestrav1connect.AuthServiceResetPasswordWithTokenProcedure: true,
 }
 
 func main() {
@@ -192,8 +195,11 @@ func main() {
 	secretHandler := masterapi.NewSecretServiceHandler(db, kek)
 	secretPath, secretSvcHandler := orkestrav1connect.NewSecretServiceHandler(secretHandler, connectOpts...)
 
+	// --- Email/SMTP ---
+	mailer := masteremail.New(q, kek)
+
 	// --- AuthService ---
-	authHandler := masterapi.NewAuthServiceHandler(db, kek, &setupToken)
+	authHandler := masterapi.NewAuthServiceHandler(db, kek, &setupToken, mailer)
 	authPath, authSvcHandler := orkestrav1connect.NewAuthServiceHandler(authHandler, connectOpts...)
 
 	// --- Session middleware ---

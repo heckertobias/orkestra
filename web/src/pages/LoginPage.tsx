@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useAuth } from '@/lib/auth'
 
 // Check at load time if OIDC is enabled — best-effort, silently ignored.
@@ -23,6 +23,7 @@ export function LoginPage() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const setupToken = params.get('setup') ?? ''
+  const oidcError = params.get('error')
 
   const isSetup = Boolean(setupToken)
 
@@ -103,6 +104,12 @@ export function LoginPage() {
             {isSetup ? 'Create the first administrator account.' : 'Sign in to your orkestra instance.'}
           </p>
 
+          {oidcError === 'oidc_no_account' && (
+            <div className="mb-4 px-3 py-2 rounded text-sm" style={{ backgroundColor: '#2d1115', color: 'var(--error)', border: '1px solid #4a1a1f' }}>
+              No orkestra account found for your SSO identity. Contact an administrator.
+            </div>
+          )}
+
           {error && (
             <div className="mb-4 px-3 py-2 rounded text-sm" style={{ backgroundColor: '#2d1115', color: 'var(--error)', border: '1px solid #4a1a1f' }}>
               {error}
@@ -137,7 +144,14 @@ export function LoginPage() {
             )}
 
             <div>
-              <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Password</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs" style={{ color: 'var(--text-muted)' }}>Password</label>
+                {!isSetup && (
+                  <Link to="/forgot-password" className="text-xs hover:underline" style={{ color: 'var(--accent)' }}>
+                    Forgot password?
+                  </Link>
+                )}
+              </div>
               <input
                 type="password"
                 value={password}

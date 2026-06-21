@@ -17,6 +17,18 @@ func (q *Queries) GetUserByOIDCSubject(ctx context.Context, sub string) (User, e
 	return i, err
 }
 
+const setOIDCSubject = `-- name: SetOIDCSubject :exec
+UPDATE users SET oidc_subject = $2 WHERE id = $1
+`
+
+// SetOIDCSubject links an existing user account to an OIDC subject on first login.
+func (q *Queries) SetOIDCSubject(ctx context.Context, id, sub string) error {
+	_, err := q.db.Exec(ctx, setOIDCSubject, id, sub)
+	return err
+}
+
+// InsertOIDCUser is kept for reference but should no longer be called.
+// New flow: only pre-created users may log in via OIDC (resolveOIDCUser).
 const insertOIDCUser = `-- name: InsertOIDCUser :one
 INSERT INTO users (id, username, display_name, oidc_subject, disabled, created_at)
 VALUES (gen_random_uuid()::text, $1, $2, $3, false, $4)
@@ -41,3 +53,4 @@ func (q *Queries) InsertOIDCUser(ctx context.Context, arg InsertOIDCUserParams) 
 	)
 	return i, err
 }
+
