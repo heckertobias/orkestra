@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, RefreshCw, Shield, X, ChevronDown, ChevronRight, Check } from 'lucide-react'
+import { Plus, RefreshCw, Shield, X, ChevronDown, ChevronRight, Check, Info } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { useAuth, isAdmin } from '@/lib/auth'
 
@@ -116,8 +116,11 @@ function buildMatrix(bindings: UserBinding[], servers: Server[], stacks: Stack[]
 type DesiredBinding = Omit<UserBinding, 'id'>
 
 function matrixToBindings(matrix: MatrixState): DesiredBinding[] {
+  // When admin is on, only the admin binding matters — all other settings are
+  // hidden and should not be persisted.
+  if (matrix.admin) return [{ role: 'admin', serverId: '', stackId: '' }]
+
   const result: DesiredBinding[] = []
-  if (matrix.admin) result.push({ role: 'admin', serverId: '', stackId: '' })
   if (matrix.secretsManager) result.push({ role: 'secrets-manager', serverId: '', stackId: '' })
 
   for (const row of matrix.rows) {
@@ -131,6 +134,21 @@ function matrixToBindings(matrix: MatrixState): DesiredBinding[] {
     }
   }
   return result
+}
+
+// ─── Error helpers ────────────────────────────────────────────────────────────
+
+/** Unwrap a Connect-protocol JSON error body into a human-readable message. */
+function apiError(text: string): string {
+  try {
+    const j = JSON.parse(text)
+    if (j && typeof j.message === 'string' && j.message) return j.message
+  } catch { /* plain text response */ }
+  return text || 'Request failed'
+}
+
+function errText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
 }
 
 // ─── UsersPage ────────────────────────────────────────────────────────────────
@@ -204,7 +222,7 @@ export function UsersPage() {
         })))
       }
     } catch (e) {
-      setError(String(e))
+      setError(errText(e))
     } finally {
       setLoading(false)
     }
@@ -222,12 +240,12 @@ export function UsersPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: form.username, displayName: form.displayName, password: form.password }),
       })
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) throw new Error(apiError(await res.text()))
       setShowCreate(false)
       setForm({ username: '', displayName: '', password: '' })
       load()
     } catch (e) {
-      setFormError(String(e))
+      setFormError(errText(e))
     } finally {
       setBusy(false)
     }
@@ -363,6 +381,7 @@ export function UsersPage() {
           user={editPerms}
           servers={servers}
           stacks={stacks}
+          isSelf={me?.id === editPerms.id}
           onClose={() => setEditPerms(null)}
           onSaved={() => { setEditPerms(null); load() }}
         />
@@ -377,12 +396,14 @@ function PermissionsMatrix({
   user,
   servers,
   stacks,
+  isSelf,
   onClose,
   onSaved,
 }: {
   user: User
   servers: Server[]
   stacks: Stack[]
+  isSelf: boolean
   onClose: () => void
   onSaved: () => void
 }) {
@@ -391,6 +412,9 @@ function PermissionsMatrix({
   )
   const [busy, setBusy]   = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // An admin viewing their own permissions cannot turn Admin off.
+  const adminLocked = isSelf && matrix.admin
 
   async function save() {
     setBusy(true)
@@ -415,20 +439,20 @@ function PermissionsMatrix({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ userId: user.id, role: b.role, serverId: b.serverId, stackId: b.stackId }),
-          }).then(r => { if (!r.ok) return r.text().then(t => { throw new Error(t) }) })
+          }).then(r => { if (!r.ok) return r.text().then(t => { throw new Error(apiError(t)) }) })
         ),
         ...toRemove.map(b =>
           fetch('/orkestra.v1.AuthService/RevokeRole', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ bindingId: b.id }),
-          }).then(r => { if (!r.ok) return r.text().then(t => { throw new Error(t) }) })
+          }).then(r => { if (!r.ok) return r.text().then(t => { throw new Error(apiError(t)) }) })
         ),
       ])
 
       onSaved()
     } catch (e) {
-      setError(String(e))
+      setError(errText(e))
     } finally {
       setBusy(false)
     }
@@ -474,60 +498,76 @@ function PermissionsMatrix({
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
           {error && <ErrorBar>{error}</ErrorBar>}
 
-          {/* Global special roles */}
+          {/* Admin switch */}
           <div>
             <p className="text-xs font-medium mb-3 uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
               Global Roles
             </p>
-            <div className="flex gap-8">
-              <Toggle
-                checked={matrix.admin}
-                onChange={v => setMatrix(m => ({ ...m, admin: v }))}
-                label="Admin"
-                description="Full system access"
-                warn
-              />
-              <Toggle
+            <SwitchRow
+              checked={matrix.admin}
+              onChange={v => setMatrix(m => ({ ...m, admin: v }))}
+              disabled={adminLocked}
+              label="Admin"
+              description="Full system access — grants all permissions across servers, stacks and secrets"
+              warn
+            />
+            {adminLocked && (
+              <InfoBar>
+                You can't remove your own admin role — at least one administrator must always remain.
+              </InfoBar>
+            )}
+          </div>
+
+          {/* Secrets Manager + Access Matrix — hidden when Admin is on */}
+          {matrix.admin ? (
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              Admins have full access to all servers, stacks and secrets.
+              Disable Admin to configure granular permissions.
+            </p>
+          ) : (
+            <>
+              {/* Secrets Manager */}
+              <SwitchRow
                 checked={matrix.secretsManager}
                 onChange={v => setMatrix(m => ({ ...m, secretsManager: v }))}
                 label="Secrets Manager"
                 description="Create, edit, reveal and delete secrets"
               />
-            </div>
-          </div>
 
-          {/* Access matrix */}
-          <div>
-            <p className="text-xs font-medium mb-3 uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-              Access Matrix
-            </p>
-            <div className="rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border)', backgroundColor: 'var(--surface-2)' }}>
-                    <th className="text-left px-4 py-2.5 text-xs font-medium w-1/4" style={{ color: 'var(--text-muted)' }}>Scope</th>
-                    <th className="text-left px-4 py-2.5 text-xs font-medium w-2/5" style={{ color: 'var(--text-muted)' }}>Access level</th>
-                    <th className="text-left px-4 py-2.5 text-xs font-medium" style={{ color: 'var(--text-muted)' }}>Stack restriction</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {matrix.rows.map((row, idx) => (
-                    <MatrixRowComp
-                      key={row.serverId || '__global__'}
-                      row={row}
-                      isGlobal={idx === 0}
-                      onChange={patch => patchRow(idx, patch)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {servers.length === 0 && (
-              <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
-                No servers enrolled yet. Global access applies to all future servers.
-              </p>
-            )}
-          </div>
+              {/* Access matrix */}
+              <div>
+                <p className="text-xs font-medium mb-3 uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+                  Access Matrix
+                </p>
+                <div className="rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border)', backgroundColor: 'var(--surface-2)' }}>
+                        <th className="text-left px-4 py-2.5 text-xs font-medium w-1/4" style={{ color: 'var(--text-muted)' }}>Scope</th>
+                        <th className="text-left px-4 py-2.5 text-xs font-medium w-2/5" style={{ color: 'var(--text-muted)' }}>Access level</th>
+                        <th className="text-left px-4 py-2.5 text-xs font-medium" style={{ color: 'var(--text-muted)' }}>Stack restriction</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {matrix.rows.map((row, idx) => (
+                        <MatrixRowComp
+                          key={row.serverId || '__global__'}
+                          row={row}
+                          isGlobal={idx === 0}
+                          onChange={patch => patchRow(idx, patch)}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {servers.length === 0 && (
+                  <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
+                    No servers enrolled yet. Global access applies to all future servers.
+                  </p>
+                )}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Footer */}
@@ -677,29 +717,64 @@ function MatrixRowComp({
   )
 }
 
-// ─── Toggle ───────────────────────────────────────────────────────────────────
+// ─── Switch ───────────────────────────────────────────────────────────────────
 
-function Toggle({
+function Switch({
   checked,
   onChange,
+  disabled,
+}: {
+  checked: boolean
+  onChange: (v: boolean) => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      role="switch"
+      aria-checked={checked}
+      onClick={() => !disabled && onChange(!checked)}
+      className="relative shrink-0 rounded-full transition-colors focus:outline-none"
+      style={{
+        width: 36,
+        height: 20,
+        backgroundColor: checked ? 'var(--accent)' : 'var(--surface-2)',
+        border: '1px solid',
+        borderColor: checked ? 'var(--accent)' : 'var(--border)',
+        opacity: disabled ? 0.45 : 1,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+      }}
+    >
+      <span
+        className="absolute top-0.5 rounded-full transition-transform"
+        style={{
+          width: 14,
+          height: 14,
+          backgroundColor: checked ? '#0d1117' : 'var(--text-muted)',
+          left: 2,
+          transform: checked ? 'translateX(16px)' : 'translateX(0)',
+        }}
+      />
+    </button>
+  )
+}
+
+function SwitchRow({
+  checked,
+  onChange,
+  disabled,
   label,
   description,
   warn,
 }: {
   checked: boolean
   onChange: (v: boolean) => void
+  disabled?: boolean
   label: string
   description: string
   warn?: boolean
 }) {
   return (
-    <label className="flex items-start gap-3 cursor-pointer select-none">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={e => onChange(e.target.checked)}
-        className="mt-0.5 accent-[var(--accent)]"
-      />
+    <div className="flex items-center justify-between gap-4">
       <div>
         <div
           className="text-sm font-medium"
@@ -707,9 +782,10 @@ function Toggle({
         >
           {label}
         </div>
-        <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{description}</div>
+        <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{description}</div>
       </div>
-    </label>
+      <Switch checked={checked} onChange={onChange} disabled={disabled} />
+    </div>
   )
 }
 
@@ -740,8 +816,17 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function ErrorBar({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mb-3 px-3 py-2 rounded text-sm" style={{ backgroundColor: '#2d1115', color: 'var(--error)', border: '1px solid #4a1a1f' }}>
+    <div className="px-3 py-2 rounded text-sm" style={{ backgroundColor: '#2d1115', color: 'var(--error)', border: '1px solid #4a1a1f' }}>
       {children}
+    </div>
+  )
+}
+
+function InfoBar({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-2 mt-2 px-3 py-2 rounded text-xs" style={{ backgroundColor: 'var(--surface-2)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+      <Info size={13} className="shrink-0 mt-0.5" />
+      <span>{children}</span>
     </div>
   )
 }
