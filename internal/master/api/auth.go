@@ -395,6 +395,20 @@ func (h *AuthServiceHandler) RevokeRole(ctx context.Context, req *connect.Reques
 	if err := requireRole(ctx, "admin"); err != nil {
 		return nil, err
 	}
+	// An admin may not revoke their OWN global admin role — analogous to the
+	// self-deletion guard in DeleteUser — ensuring at least one admin always remains.
+	if actor := masterauth.UserFromContext(ctx); actor != nil {
+		mine, err := h.q.ListRoleBindingsByUser(ctx, actor.ID)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("revoke role: %w", err))
+		}
+		for _, b := range mine {
+			if b.ID == req.Msg.BindingId && b.RoleID == "role-admin" && b.ServerID == nil && b.StackID == nil {
+				return nil, connect.NewError(connect.CodeFailedPrecondition,
+					fmt.Errorf("cannot revoke your own admin role"))
+			}
+		}
+	}
 	if err := h.q.DeleteRoleBinding(ctx, req.Msg.BindingId); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("revoke role: %w", err))
 	}
