@@ -2,6 +2,8 @@ module github.com/heckertobias/orkestra
 
 go 1.25.7
 
+toolchain go1.26.4
+
 require (
 	connectrpc.com/connect v1.20.0
 	github.com/compose-spec/compose-go/v2 v2.11.0
