@@ -26,6 +26,7 @@ import (
 	"github.com/heckertobias/orkestra/internal/master/store"
 	"github.com/heckertobias/orkestra/internal/shared/version"
 	"github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1/orkestrav1connect"
+	webui "github.com/heckertobias/orkestra/web"
 )
 
 // publicProcedures lists Connect RPC procedures that do not require a session.
@@ -207,6 +208,7 @@ func main() {
 	uiMux.HandleFunc("/api/audit", authHandler.AuditLogHTTPHandler)
 	uiMux.HandleFunc("/auth/oidc/login", oidcProvider.LoginHandler)
 	uiMux.HandleFunc("/auth/oidc/callback", oidcProvider.CallbackHandler(q, 24*time.Hour))
+	uiMux.Handle("/", webui.Handler())
 	uiMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
