@@ -208,6 +208,9 @@ func (p *Provider) CallbackHandler(q *store.Queries, sessionTTL time.Duration) h
 			return
 		}
 
+		// Sync email and display name from the IdP on every login.
+		syncOIDCProfile(ctx, q, user, claims.Email, claims.Name)
+
 		// Idempotently ensure the resolved role binding exists.
 		if role != "" {
 			roleID := "role-" + role
@@ -278,6 +281,27 @@ func resolveOIDCUser(ctx context.Context, q *store.Queries, sub, email string) (
 	}
 	user.OidcSubject = &sub
 	return user, nil
+}
+
+// syncOIDCProfile updates the user's email (username) and display name from the IdP
+// claims on every successful login. Errors are logged but do not fail the login.
+func syncOIDCProfile(ctx context.Context, q *store.Queries, user store.User, email, name string) {
+	if email != "" && email != user.Username {
+		if _, err := q.SetUsername(ctx, store.SetUsernameParams{ID: user.ID, Username: email}); err != nil {
+			slog.Warn("oidc: failed to sync email (may be taken by another account)", "user_id", user.ID, "err", err)
+		}
+	}
+	if name != "" {
+		currentName := ""
+		if user.DisplayName != nil {
+			currentName = *user.DisplayName
+		}
+		if name != currentName {
+			if _, err := q.UpdateDisplayName(ctx, store.UpdateDisplayNameParams{ID: user.ID, DisplayName: &name}); err != nil {
+				slog.Warn("oidc: failed to sync display name", "user_id", user.ID, "err", err)
+			}
+		}
+	}
 }
 
 // resolveRole reads the configured groups claim from the token, normalises it to

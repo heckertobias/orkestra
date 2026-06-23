@@ -115,13 +115,14 @@ type PasswordPolicy struct {
 }
 
 type PasswordResetToken struct {
-	ID        string `json:"id"`
-	UserID    string `json:"user_id"`
-	TokenHash string `json:"token_hash"`
-	Purpose   string `json:"purpose"`
-	ExpiresAt int64  `json:"expires_at"`
-	UsedAt    *int64 `json:"used_at"`
-	CreatedAt int64  `json:"created_at"`
+	ID        string  `json:"id"`
+	UserID    string  `json:"user_id"`
+	TokenHash string  `json:"token_hash"`
+	Purpose   string  `json:"purpose"`
+	ExpiresAt int64   `json:"expires_at"`
+	UsedAt    *int64  `json:"used_at"`
+	CreatedAt int64   `json:"created_at"`
+	NewEmail  *string `json:"new_email"`
 }
 
 type Role struct {

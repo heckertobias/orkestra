@@ -44,3 +44,7 @@ SELECT * FROM password_reset_tokens WHERE token_hash = $1;
 
 -- name: MarkPasswordResetTokenUsed :exec
 UPDATE password_reset_tokens SET used_at = $2 WHERE id = $1;
+
+-- name: InsertEmailChangeToken :exec
+INSERT INTO password_reset_tokens (id, user_id, token_hash, purpose, new_email, expires_at, created_at)
+VALUES ($1, $2, $3, 'email_change', $4, $5, $6);

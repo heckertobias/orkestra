@@ -17,6 +17,11 @@ service AuthService {
   rpc DeleteUser(DeleteUserRequest)       returns (AuthEmpty);
   rpc ResetPassword(ResetPasswordRequest) returns (AuthEmpty);
 
+  // Self-service profile management (authenticated user)
+  rpc UpdateProfile(UpdateProfileRequest)                       returns (User);
+  rpc RequestEmailChange(RequestEmailChangeRequest)             returns (AuthEmpty);
+  rpc ConfirmEmailChange(ConfirmEmailChangeRequest)             returns (AuthEmpty);
+
   // Self-service password management (authenticated user)
   rpc ChangePassword(ChangePasswordRequest)                     returns (AuthEmpty);
   rpc RequestPasswordReset(RequestPasswordResetRequest)         returns (AuthEmpty);
@@ -88,6 +93,19 @@ message UpdateUserRequest {
   string id           = 1;
   string display_name = 2;
   bool   disabled     = 3;
+  string username     = 4; // new email address (admin path; must be a valid email)
+}
+
+message UpdateProfileRequest {
+  string display_name = 1;
+}
+
+message RequestEmailChangeRequest {
+  string new_email = 1;
+}
+
+message ConfirmEmailChangeRequest {
+  string token = 1;
 }
 
 message ResetPasswordRequest {

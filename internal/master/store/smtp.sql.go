@@ -33,7 +33,7 @@ func (q *Queries) GetPasswordPolicy(ctx context.Context) (PasswordPolicy, error)
 }
 
 const getPasswordResetTokenByHash = `-- name: GetPasswordResetTokenByHash :one
-SELECT id, user_id, token_hash, purpose, expires_at, used_at, created_at FROM password_reset_tokens WHERE token_hash = $1
+SELECT id, user_id, token_hash, purpose, expires_at, used_at, created_at, new_email FROM password_reset_tokens WHERE token_hash = $1
 `
 
 func (q *Queries) GetPasswordResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error) {
@@ -47,6 +47,7 @@ func (q *Queries) GetPasswordResetTokenByHash(ctx context.Context, tokenHash str
 		&i.ExpiresAt,
 		&i.UsedAt,
 		&i.CreatedAt,
+		&i.NewEmail,
 	)
 	return i, err
 }
@@ -71,6 +72,32 @@ func (q *Queries) GetSMTPConfig(ctx context.Context) (SmtpConfig, error) {
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const insertEmailChangeToken = `-- name: InsertEmailChangeToken :exec
+INSERT INTO password_reset_tokens (id, user_id, token_hash, purpose, new_email, expires_at, created_at)
+VALUES ($1, $2, $3, 'email_change', $4, $5, $6)
+`
+
+type InsertEmailChangeTokenParams struct {
+	ID        string  `json:"id"`
+	UserID    string  `json:"user_id"`
+	TokenHash string  `json:"token_hash"`
+	NewEmail  *string `json:"new_email"`
+	ExpiresAt int64   `json:"expires_at"`
+	CreatedAt int64   `json:"created_at"`
+}
+
+func (q *Queries) InsertEmailChangeToken(ctx context.Context, arg InsertEmailChangeTokenParams) error {
+	_, err := q.db.Exec(ctx, insertEmailChangeToken,
+		arg.ID,
+		arg.UserID,
+		arg.TokenHash,
+		arg.NewEmail,
+		arg.ExpiresAt,
+		arg.CreatedAt,
+	)
+	return err
 }
 
 const insertPasswordResetToken = `-- name: InsertPasswordResetToken :exec

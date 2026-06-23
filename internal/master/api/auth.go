@@ -7,14 +7,17 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/mail"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	masterauth "github.com/heckertobias/orkestra/internal/master/auth"
@@ -313,7 +316,9 @@ func (h *AuthServiceHandler) CreateUser(ctx context.Context, req *connect.Reques
 	return connect.NewResponse(userToProto(row, nil, nil)), nil
 }
 
-// UpdateUser updates display_name and disabled flag (admin only).
+// UpdateUser updates email, display_name, and disabled flag (admin only).
+// For OIDC-linked users, email and display_name are IdP-managed and cannot be changed here;
+// only the disabled flag is applied. Own-email change is explicitly allowed.
 func (h *AuthServiceHandler) UpdateUser(ctx context.Context, req *connect.Request[orkestraV1.UpdateUserRequest]) (*connect.Response[orkestraV1.User], error) {
 	if err := requireRole(ctx, "admin"); err != nil {
 		return nil, err
@@ -324,17 +329,158 @@ func (h *AuthServiceHandler) UpdateUser(ctx context.Context, req *connect.Reques
 			return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("cannot deactivate your own account"))
 		}
 	}
+	// Load target to check OIDC linkage.
+	target, err := h.q.GetUser(ctx, req.Msg.Id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
+	}
+
+	newUsername := req.Msg.Username
+	newDisplayName := req.Msg.DisplayName
+
+	if target.OidcSubject != nil {
+		// OIDC users: email and display_name are managed by the identity provider.
+		// Silently keep the DB values; only the disabled flag is honoured.
+		newUsername = target.Username
+		if target.DisplayName != nil {
+			newDisplayName = *target.DisplayName
+		} else {
+			newDisplayName = ""
+		}
+	} else {
+		// Validate the new email.
+		if _, err := mail.ParseAddress(newUsername); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("username must be a valid email address"))
+		}
+	}
+
 	row, err := h.q.UpdateUser(ctx, store.UpdateUserParams{
 		ID:          req.Msg.Id,
-		DisplayName: ptrString(req.Msg.DisplayName),
+		Username:    newUsername,
+		DisplayName: ptrString(newDisplayName),
 		Disabled:    req.Msg.Disabled,
 	})
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("email address already in use"))
+		}
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update user: %w", err))
 	}
 	roles, _ := h.q.GetUserRoles(ctx, row.ID)
 	bindings := h.loadUserBindings(ctx, row.ID)
 	return connect.NewResponse(userToProto(row, roles, bindings)), nil
+}
+
+// UpdateProfile updates the authenticated user's display name.
+// Rejected for OIDC-linked users (IdP manages the display name).
+func (h *AuthServiceHandler) UpdateProfile(ctx context.Context, req *connect.Request[orkestraV1.UpdateProfileRequest]) (*connect.Response[orkestraV1.User], error) {
+	u := masterauth.UserFromContext(ctx)
+	if u == nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("not authenticated"))
+	}
+	user, err := h.q.GetUser(ctx, u.ID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
+	}
+	if user.OidcSubject != nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("display name is managed by your identity provider"))
+	}
+	name := strings.TrimSpace(req.Msg.DisplayName)
+	if name == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("display_name is required"))
+	}
+	row, err := h.q.UpdateDisplayName(ctx, store.UpdateDisplayNameParams{ID: u.ID, DisplayName: &name})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update display name: %w", err))
+	}
+	h.auditAuth(ctx, &row, "user.update_profile", nil)
+	roles, _ := h.q.GetUserRoles(ctx, row.ID)
+	bindings := h.loadUserBindings(ctx, row.ID)
+	return connect.NewResponse(userToProto(row, roles, bindings)), nil
+}
+
+// RequestEmailChange sends a verification link to the requested new email address.
+// The change only takes effect once the user clicks the link (ConfirmEmailChange).
+// Rejected for OIDC-linked users (IdP manages the email address).
+func (h *AuthServiceHandler) RequestEmailChange(ctx context.Context, req *connect.Request[orkestraV1.RequestEmailChangeRequest]) (*connect.Response[orkestraV1.AuthEmpty], error) {
+	u := masterauth.UserFromContext(ctx)
+	if u == nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("not authenticated"))
+	}
+	user, err := h.q.GetUser(ctx, u.ID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
+	}
+	if user.OidcSubject != nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("email address is managed by your identity provider"))
+	}
+	newEmail := strings.TrimSpace(req.Msg.NewEmail)
+	if _, err := mail.ParseAddress(newEmail); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("new_email must be a valid email address"))
+	}
+	if strings.EqualFold(newEmail, user.Username) {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("new email is the same as the current email"))
+	}
+	// Check that the new address is not already taken.
+	existing, err := h.q.GetUserByUsername(ctx, newEmail)
+	if err == nil && existing.ID != u.ID {
+		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("email address already in use"))
+	}
+	rawToken, tokenHash := generateResetToken()
+	now := time.Now()
+	_ = h.q.InsertEmailChangeToken(ctx, store.InsertEmailChangeTokenParams{
+		ID:        uuid.NewString(),
+		UserID:    u.ID,
+		TokenHash: tokenHash,
+		NewEmail:  &newEmail,
+		ExpiresAt: now.Add(time.Hour).UnixMilli(),
+		CreatedAt: now.UnixMilli(),
+	})
+	link := h.publicURL(req.Header()) + "/verify-email?token=" + rawToken
+	h.mailer.SendEmailVerification(ctx, newEmail, link)
+	return connect.NewResponse(&orkestraV1.AuthEmpty{}), nil
+}
+
+// ConfirmEmailChange applies a pending email-change token.
+// This is a public RPC (no session required) so that the user can confirm
+// the change by clicking a link in an email sent to the new address.
+func (h *AuthServiceHandler) ConfirmEmailChange(ctx context.Context, req *connect.Request[orkestraV1.ConfirmEmailChangeRequest]) (*connect.Response[orkestraV1.AuthEmpty], error) {
+	if req.Msg.Token == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("token required"))
+	}
+	tokenHash := hashResetToken(req.Msg.Token)
+	record, err := h.q.GetPasswordResetTokenByHash(ctx, tokenHash)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("invalid or expired token"))
+	}
+	if record.Purpose != "email_change" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid token"))
+	}
+	if record.UsedAt != nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("token already used"))
+	}
+	if time.Now().UnixMilli() > record.ExpiresAt {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("token expired"))
+	}
+	if record.NewEmail == nil || *record.NewEmail == "" {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("token has no associated email"))
+	}
+	// Re-check uniqueness — may have changed since the token was issued.
+	existing, err := h.q.GetUserByUsername(ctx, *record.NewEmail)
+	if err == nil && existing.ID != record.UserID {
+		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("email address already in use"))
+	}
+	if _, err := h.q.SetUsername(ctx, store.SetUsernameParams{ID: record.UserID, Username: *record.NewEmail}); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update email: %w", err))
+	}
+	now := time.Now().UnixMilli()
+	_ = h.q.MarkPasswordResetTokenUsed(ctx, store.MarkPasswordResetTokenUsedParams{
+		ID:     record.ID,
+		UsedAt: &now,
+	})
+	h.auditAuth(ctx, nil, "user.email_changed", ptrString(fmt.Sprintf("user_id=%s new_email=%s", record.UserID, *record.NewEmail)))
+	return connect.NewResponse(&orkestraV1.AuthEmpty{}), nil
 }
 
 // DeleteUser permanently removes a user from the database (admin only).

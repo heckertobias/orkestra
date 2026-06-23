@@ -42,6 +42,20 @@ This link expires in 72 hours. If you did not expect this email, you can ignore 
 	m.send(ctx, to, subject, body)
 }
 
+// SendEmailVerification sends a "confirm your new email address" email.
+func (m *Mailer) SendEmailVerification(ctx context.Context, to, verifyURL string) {
+	subject := "Confirm your new orkestra email address"
+	body := fmt.Sprintf(`You requested an email address change for your orkestra account.
+
+Click the link below to confirm your new email address:
+
+  %s
+
+This link expires in 1 hour. If you did not request this change, you can ignore this email.
+`, verifyURL)
+	m.send(ctx, to, subject, body)
+}
+
 // SendPasswordReset sends a "reset your password" email.
 func (m *Mailer) SendPasswordReset(ctx context.Context, to, resetURL string) {
 	subject := "Reset your orkestra password"

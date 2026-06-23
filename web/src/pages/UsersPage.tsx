@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, RefreshCw, Pencil, X, ChevronDown, ChevronRight, Check, Info } from 'lucide-react'
+import { Plus, RefreshCw, Pencil, X, ChevronDown, ChevronRight, Check, Info, KeyRound } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { useAuth, isAdmin } from '@/lib/auth'
 
@@ -19,6 +19,7 @@ interface User {
   disabled: boolean
   roles: string[]
   hasPassword: boolean
+  hasOidc: boolean
   createdAt: number
   lastLoginAt: number
   bindings: UserBinding[]
@@ -192,6 +193,7 @@ export function UsersPage() {
           disabled:    Boolean(u.disabled ?? false),
           roles:       Array.isArray(u.roles) ? u.roles.map(String) : [],
           hasPassword: Boolean(u.hasPassword ?? u.has_password ?? false),
+          hasOidc:     Boolean(u.hasOidc ?? u.has_oidc ?? false),
           createdAt:   Number(u.createdAt ?? u.created_at ?? 0),
           lastLoginAt: Number(u.lastLoginAt ?? u.last_login_at ?? 0),
           bindings:    Array.isArray(u.bindings) ? u.bindings.map((b: Record<string, unknown>) => ({
@@ -406,16 +408,42 @@ function PermissionsMatrix({
   onClose: () => void
   onSaved: () => void
 }) {
-  const [matrix, setMatrix]           = useState<MatrixState>(() =>
+  const { refresh } = useAuth()
+  const [matrix, setMatrix]             = useState<MatrixState>(() =>
     buildMatrix(user.bindings, servers, stacks)
   )
-  const [disabled, setDisabled]       = useState(user.disabled)
-  const [busy, setBusy]               = useState(false)
-  const [error, setError]             = useState<string | null>(null)
+  const [disabled, setDisabled]         = useState(user.disabled)
+  const [email, setEmail]               = useState(user.username)
+  const [displayName, setDisplayName]   = useState(user.displayName)
+  const [busy, setBusy]                 = useState(false)
+  const [error, setError]               = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [showResetPw, setShowResetPw]   = useState(false)
+  const [newPw, setNewPw]               = useState('')
+  const [resetPwError, setResetPwError] = useState<string | null>(null)
 
   // An admin viewing their own permissions cannot turn Admin off.
   const adminLocked = isSelf && matrix.admin
+
+  async function resetPassword() {
+    if (!newPw) { setResetPwError('New password required'); return }
+    setBusy(true)
+    setResetPwError(null)
+    try {
+      const res = await fetch('/orkestra.v1.AuthService/ResetPassword', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id, new_password: newPw }),
+      })
+      if (!res.ok) throw new Error(apiError(await res.text()))
+      setShowResetPw(false)
+      setNewPw('')
+    } catch (e) {
+      setResetPwError(errText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function save() {
     setBusy(true)
@@ -423,14 +451,20 @@ function PermissionsMatrix({
     try {
       const promises: Promise<void>[] = []
 
-      // Update account disabled state if it changed.
-      if (disabled !== user.disabled) {
+      // Update email, display name, or disabled state if any changed.
+      const emailChanged       = email !== user.username
+      const displayNameChanged = displayName !== user.displayName
+      const disabledChanged    = disabled !== user.disabled
+
+      if (emailChanged || displayNameChanged || disabledChanged) {
         promises.push(
           fetch('/orkestra.v1.AuthService/UpdateUser', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: user.id, displayName: user.displayName, disabled }),
-          }).then(r => { if (!r.ok) return r.text().then(t => { throw new Error(apiError(t)) }) })
+            body: JSON.stringify({ id: user.id, username: email, displayName, disabled }),
+          }).then(async r => {
+            if (!r.ok) throw new Error(apiError(await r.text()))
+          })
         )
       }
 
@@ -465,6 +499,7 @@ function PermissionsMatrix({
       )
 
       await Promise.all(promises)
+      if (isSelf) await refresh()
       onSaved()
     } catch (e) {
       setError(errText(e))
@@ -532,6 +567,49 @@ function PermissionsMatrix({
           {/* Scrollable content */}
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
             {error && <ErrorBar>{error}</ErrorBar>}
+
+            {/* Email & display name */}
+            <div>
+              <p className="text-xs font-medium mb-3 uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+                Profile
+              </p>
+              {user.hasOidc ? (
+                <div className="space-y-2">
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Email</p>
+                    <p className="text-sm" style={{ color: 'var(--text)' }}>{user.username}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Display name</p>
+                    <p className="text-sm" style={{ color: 'var(--text)' }}>{user.displayName || '—'}</p>
+                  </div>
+                  <InfoBar>Email and display name are managed by the identity provider (SSO).</InfoBar>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <Field label="Email">
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      className={inputCls}
+                      style={inputStyle}
+                      placeholder="user@example.com"
+                    />
+                  </Field>
+                  <Field label="Display name">
+                    <input
+                      type="text"
+                      value={displayName}
+                      onChange={e => setDisplayName(e.target.value)}
+                      className={inputCls}
+                      style={inputStyle}
+                      placeholder="Jane Smith"
+                    />
+                  </Field>
+                </div>
+              )}
+            </div>
 
             {/* Account active toggle */}
             <div>
@@ -629,8 +707,8 @@ function PermissionsMatrix({
             className="flex items-center justify-between gap-2 px-6 py-4 border-t shrink-0"
             style={{ borderColor: 'var(--border)' }}
           >
-            {/* Delete link — hidden for self */}
-            <div>
+            {/* Left: destructive actions */}
+            <div className="flex items-center gap-3">
               {!isSelf && (
                 <button
                   onClick={() => setConfirmDelete(true)}
@@ -640,6 +718,14 @@ function PermissionsMatrix({
                   Delete user
                 </button>
               )}
+              <button
+                onClick={() => { setShowResetPw(true); setResetPwError(null); setNewPw('') }}
+                className="flex items-center gap-1.5 text-sm"
+                style={{ color: 'var(--text-muted)' }}
+                title="Admin reset password"
+              >
+                <KeyRound size={13} /> Reset password
+              </button>
             </div>
 
             <div className="flex gap-2">
@@ -662,6 +748,48 @@ function PermissionsMatrix({
           </div>
         </div>
       </div>
+
+      {/* Reset password dialog */}
+      {showResetPw && (
+        <Modal title="Reset password" onClose={() => setShowResetPw(false)}>
+          <p className="text-sm mb-3" style={{ color: 'var(--text-muted)' }}>
+            Set a new password for <strong style={{ color: 'var(--text)' }}>{user.username}</strong>.
+            This immediately replaces their current password.
+          </p>
+          {resetPwError && <ErrorBar>{resetPwError}</ErrorBar>}
+          <div className="mt-3 space-y-3">
+            <div>
+              <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>New password</label>
+              <input
+                type="password"
+                value={newPw}
+                onChange={e => setNewPw(e.target.value)}
+                className={inputCls}
+                style={inputStyle}
+                autoComplete="new-password"
+                autoFocus
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 mt-4">
+            <button
+              onClick={() => setShowResetPw(false)}
+              className="px-4 py-1.5 rounded border text-sm"
+              style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={resetPassword}
+              disabled={busy}
+              className="px-4 py-1.5 rounded text-sm font-medium disabled:opacity-50"
+              style={{ backgroundColor: 'var(--accent)', color: '#0d1117' }}
+            >
+              {busy ? 'Resetting…' : 'Reset password'}
+            </button>
+          </div>
+        </Modal>
+      )}
 
       {/* Delete confirmation dialog */}
       {confirmDelete && (

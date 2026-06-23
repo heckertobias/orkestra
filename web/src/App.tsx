@@ -10,6 +10,7 @@ import { SecretsPage } from './pages/SecretsPage'
 import { LoginPage } from './pages/LoginPage'
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
 import { SetPasswordPage } from './pages/SetPasswordPage'
+import { VerifyEmailPage } from './pages/VerifyEmailPage'
 import { UsersPage } from './pages/UsersPage'
 import { AuditLogPage } from './pages/AuditLogPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -39,6 +40,7 @@ export default function App() {
               <Route path="login"            element={<LoginPage />} />
               <Route path="forgot-password"  element={<ForgotPasswordPage />} />
               <Route path="set-password"     element={<SetPasswordPage />} />
+              <Route path="verify-email"     element={<VerifyEmailPage />} />
               {/* Authenticated routes */}
               <Route element={<AuthGuard><Layout /></AuthGuard>}>
                 <Route index element={<DashboardPage />} />

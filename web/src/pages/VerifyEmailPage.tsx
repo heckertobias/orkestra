@@ -1,0 +1,113 @@
+import { useEffect, useState } from 'react'
+import { useSearchParams, Link } from 'react-router-dom'
+
+export function VerifyEmailPage() {
+  const [params] = useSearchParams()
+  const token = params.get('token') ?? ''
+
+  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading')
+  const [message, setMessage] = useState('')
+
+  useEffect(() => {
+    if (!token) {
+      setStatus('error')
+      setMessage('No token found in the link. Please use the link from your confirmation email.')
+      return
+    }
+
+    fetch('/orkestra.v1.AuthService/ConfirmEmailChange', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    })
+      .then(async res => {
+        if (res.ok) {
+          setStatus('success')
+        } else {
+          const d = await res.json().catch(() => ({}))
+          throw new Error(d.message ?? 'Failed to confirm email change')
+        }
+      })
+      .catch(err => {
+        setStatus('error')
+        setMessage(String(err).replace(/^Error: /, ''))
+      })
+  }, [token])
+
+  return (
+    <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg)' }}>
+      <div className="w-full max-w-sm">
+        {/* Logo */}
+        <div className="flex items-center justify-center gap-3 mb-8">
+          <div
+            className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold"
+            style={{ backgroundColor: 'var(--accent)', color: '#0d1117' }}
+          >
+            O
+          </div>
+          <span className="text-xl font-semibold" style={{ color: 'var(--text)' }}>
+            ork<span style={{ color: 'var(--accent)' }}>estra</span>
+          </span>
+        </div>
+
+        <div
+          className="rounded-lg border p-6 text-center"
+          style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)' }}
+        >
+          {status === 'loading' && (
+            <>
+              <h1 className="text-base font-semibold mb-2" style={{ color: 'var(--text)' }}>
+                Confirming…
+              </h1>
+              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                Verifying your email address.
+              </p>
+            </>
+          )}
+
+          {status === 'success' && (
+            <>
+              <div
+                className="w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-3 text-lg"
+                style={{ backgroundColor: 'rgba(126,226,42,0.15)', color: 'var(--accent)' }}
+              >
+                ✓
+              </div>
+              <h1 className="text-base font-semibold mb-2" style={{ color: 'var(--text)' }}>
+                Email confirmed
+              </h1>
+              <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>
+                Your email address has been updated. Please use your new address to sign in.
+              </p>
+              <Link
+                to="/login"
+                className="inline-block px-4 py-2 rounded text-sm font-medium"
+                style={{ backgroundColor: 'var(--accent)', color: '#0d1117' }}
+              >
+                Go to login
+              </Link>
+            </>
+          )}
+
+          {status === 'error' && (
+            <>
+              <h1 className="text-base font-semibold mb-2" style={{ color: 'var(--error)' }}>
+                Confirmation failed
+              </h1>
+              <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>
+                {message || 'This link is invalid or has already been used.'}
+              </p>
+              <Link
+                to="/"
+                className="text-sm"
+                style={{ color: 'var(--accent)' }}
+              >
+                Back to dashboard
+              </Link>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}

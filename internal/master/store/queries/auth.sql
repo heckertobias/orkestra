@@ -16,7 +16,13 @@ VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: UpdateUser :one
-UPDATE users SET display_name = $2, disabled = $3 WHERE id = $1 RETURNING *;
+UPDATE users SET username = $2, display_name = $3, disabled = $4 WHERE id = $1 RETURNING *;
+
+-- name: UpdateDisplayName :one
+UPDATE users SET display_name = $2 WHERE id = $1 RETURNING *;
+
+-- name: SetUsername :one
+UPDATE users SET username = $2 WHERE id = $1 RETURNING *;
 
 -- name: DeleteUserByID :exec
 DELETE FROM users WHERE id = $1;

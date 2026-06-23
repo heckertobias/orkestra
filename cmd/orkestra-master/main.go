@@ -32,9 +32,10 @@ import (
 
 // publicProcedures lists Connect RPC procedures that do not require a session.
 var publicProcedures = map[string]bool{
-	orkestrav1connect.AuthServiceLoginProcedure:              true,
+	orkestrav1connect.AuthServiceLoginProcedure:                true,
 	orkestrav1connect.AuthServiceRequestPasswordResetProcedure: true,
 	orkestrav1connect.AuthServiceResetPasswordWithTokenProcedure: true,
+	orkestrav1connect.AuthServiceConfirmEmailChangeProcedure:    true,
 }
 
 func main() {

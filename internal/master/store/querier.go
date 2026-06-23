@@ -39,6 +39,7 @@ type Querier interface {
 	InsertAPIKey(ctx context.Context, arg InsertAPIKeyParams) (ApiKey, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
 	InsertCertificate(ctx context.Context, arg InsertCertificateParams) error
+	InsertEmailChangeToken(ctx context.Context, arg InsertEmailChangeTokenParams) error
 	InsertEnrollmentToken(ctx context.Context, arg InsertEnrollmentTokenParams) (EnrollmentToken, error)
 	InsertEvent(ctx context.Context, arg InsertEventParams) error
 	InsertPasswordResetToken(ctx context.Context, arg InsertPasswordResetTokenParams) error
@@ -74,10 +75,12 @@ type Querier interface {
 	RevokeSession(ctx context.Context, id string) error
 	SetLastLogin(ctx context.Context, arg SetLastLoginParams) error
 	SetPasswordHash(ctx context.Context, arg SetPasswordHashParams) error
+	SetUsername(ctx context.Context, arg SetUsernameParams) (User, error)
 	SoftDeleteServer(ctx context.Context, arg SoftDeleteServerParams) error
 	SoftDeleteStack(ctx context.Context, arg SoftDeleteStackParams) error
 	TouchAPIKey(ctx context.Context, arg TouchAPIKeyParams) error
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
+	UpdateDisplayName(ctx context.Context, arg UpdateDisplayNameParams) (User, error)
 	UpdateSecret(ctx context.Context, arg UpdateSecretParams) (Secret, error)
 	UpdateServer(ctx context.Context, arg UpdateServerParams) (Server, error)
 	UpdateServerStatus(ctx context.Context, arg UpdateServerStatusParams) error

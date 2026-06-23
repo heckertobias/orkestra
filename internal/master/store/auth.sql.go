@@ -413,6 +413,31 @@ func (q *Queries) SetPasswordHash(ctx context.Context, arg SetPasswordHashParams
 	return err
 }
 
+const setUsername = `-- name: SetUsername :one
+UPDATE users SET username = $2 WHERE id = $1 RETURNING id, username, display_name, password_hash, oidc_subject, disabled, created_at, last_login_at
+`
+
+type SetUsernameParams struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+}
+
+func (q *Queries) SetUsername(ctx context.Context, arg SetUsernameParams) (User, error) {
+	row := q.db.QueryRow(ctx, setUsername, arg.ID, arg.Username)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.OidcSubject,
+		&i.Disabled,
+		&i.CreatedAt,
+		&i.LastLoginAt,
+	)
+	return i, err
+}
+
 const touchSession = `-- name: TouchSession :exec
 UPDATE sessions SET last_seen = $2 WHERE id = $1
 `
@@ -427,18 +452,49 @@ func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) erro
 	return err
 }
 
+const updateDisplayName = `-- name: UpdateDisplayName :one
+UPDATE users SET display_name = $2 WHERE id = $1 RETURNING id, username, display_name, password_hash, oidc_subject, disabled, created_at, last_login_at
+`
+
+type UpdateDisplayNameParams struct {
+	ID          string  `json:"id"`
+	DisplayName *string `json:"display_name"`
+}
+
+func (q *Queries) UpdateDisplayName(ctx context.Context, arg UpdateDisplayNameParams) (User, error) {
+	row := q.db.QueryRow(ctx, updateDisplayName, arg.ID, arg.DisplayName)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.OidcSubject,
+		&i.Disabled,
+		&i.CreatedAt,
+		&i.LastLoginAt,
+	)
+	return i, err
+}
+
 const updateUser = `-- name: UpdateUser :one
-UPDATE users SET display_name = $2, disabled = $3 WHERE id = $1 RETURNING id, username, display_name, password_hash, oidc_subject, disabled, created_at, last_login_at
+UPDATE users SET username = $2, display_name = $3, disabled = $4 WHERE id = $1 RETURNING id, username, display_name, password_hash, oidc_subject, disabled, created_at, last_login_at
 `
 
 type UpdateUserParams struct {
 	ID          string  `json:"id"`
+	Username    string  `json:"username"`
 	DisplayName *string `json:"display_name"`
 	Disabled    bool    `json:"disabled"`
 }
 
 func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error) {
-	row := q.db.QueryRow(ctx, updateUser, arg.ID, arg.DisplayName, arg.Disabled)
+	row := q.db.QueryRow(ctx, updateUser,
+		arg.ID,
+		arg.Username,
+		arg.DisplayName,
+		arg.Disabled,
+	)
 	var i User
 	err := row.Scan(
 		&i.ID,
