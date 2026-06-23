@@ -3,10 +3,30 @@
 # starts the Master and the Vite dev server.
 # All background processes are stopped when this script exits (Ctrl+C or process death).
 # Copy .env.example → .env to override defaults.
+#
+# Optional services (off by default):
+#   --keycloak   Start a pre-configured Keycloak IdP for OIDC testing
+#   --mailpit    Start Mailpit SMTP catcher for email testing
+#   --all        Start all optional services
+#
+# These can also be enabled via env vars: ORKESTRA_DEV_KEYCLOAK=1, ORKESTRA_DEV_MAILPIT=1
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$REPO_ROOT"
+
+# ── Parse flags ───────────────────────────────────────────────────────────────
+
+START_KEYCLOAK="${ORKESTRA_DEV_KEYCLOAK:-0}"
+START_MAILPIT="${ORKESTRA_DEV_MAILPIT:-0}"
+
+for arg in "$@"; do
+  case "$arg" in
+    --keycloak) START_KEYCLOAK=1 ;;
+    --mailpit|--smtp) START_MAILPIT=1 ;;
+    --all) START_KEYCLOAK=1; START_MAILPIT=1 ;;
+  esac
+done
 
 # ── Load .env if present ──────────────────────────────────────────────────────
 
@@ -28,6 +48,18 @@ AGENT_ADDR="${ORKESTRA_AGENT_ADDR:-0.0.0.0:8443}"
 METRICS_ADDR="${ORKESTRA_METRICS_ADDR:-0.0.0.0:9090}"
 VITE_PORT="${ORKESTRA_VITE_PORT:-5173}"
 
+# Optional-service config
+KEYCLOAK_CONTAINER="${ORKESTRA_DEV_KEYCLOAK_CONTAINER:-orkestra-dev-keycloak}"
+KEYCLOAK_PORT="${ORKESTRA_DEV_KEYCLOAK_PORT:-8180}"
+KEYCLOAK_IMAGE="${ORKESTRA_DEV_KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.0}"
+KEYCLOAK_ADMIN="${ORKESTRA_DEV_KEYCLOAK_ADMIN:-admin}"
+KEYCLOAK_ADMIN_PASSWORD="${ORKESTRA_DEV_KEYCLOAK_ADMIN_PASSWORD:-admin}"
+
+MAILPIT_CONTAINER="${ORKESTRA_DEV_MAILPIT_CONTAINER:-orkestra-dev-mailpit}"
+MAILPIT_SMTP_PORT="${ORKESTRA_DEV_MAILPIT_SMTP_PORT:-1025}"
+MAILPIT_UI_PORT="${ORKESTRA_DEV_MAILPIT_UI_PORT:-8025}"
+MAILPIT_IMAGE="${ORKESTRA_DEV_MAILPIT_IMAGE:-axllent/mailpit:latest}"
+
 MASTER_LOG="/tmp/orkestra-master.log"
 VITE_LOG="/tmp/orkestra-vite.log"
 
@@ -47,14 +79,18 @@ cleanup() {
   [[ -n "$MASTER_PID" ]] && kill "$MASTER_PID" 2>/dev/null || true
   [[ -n "$VITE_PID"   ]] && kill "$VITE_PID"   2>/dev/null || true
   wait 2>/dev/null || true
-  echo "→ Done."
+  echo "→ Done. (Postgres, Keycloak and Mailpit containers left running.)"
 }
 trap cleanup EXIT INT TERM
 
 # ── Port check ────────────────────────────────────────────────────────────────
 
+PORTS_TO_CHECK=("$UI_PORT" "$AGENT_PORT" "$METRICS_PORT" "$VITE_PORT")
+[[ "$START_KEYCLOAK" == "1" ]] && PORTS_TO_CHECK+=("$KEYCLOAK_PORT")
+[[ "$START_MAILPIT"  == "1" ]] && PORTS_TO_CHECK+=("$MAILPIT_SMTP_PORT" "$MAILPIT_UI_PORT")
+
 BLOCKED=""
-for port in "$UI_PORT" "$AGENT_PORT" "$METRICS_PORT" "$VITE_PORT"; do
+for port in "${PORTS_TO_CHECK[@]}"; do
   pid="$(lsof -ti tcp:"$port" 2>/dev/null || true)"
   if [[ -n "$pid" ]]; then
     cmd="$(ps -p "$pid" -o comm= 2>/dev/null || echo '?')"
@@ -95,6 +131,70 @@ else
     sleep 1
   done
   echo " ready."
+fi
+
+# ── Mailpit ───────────────────────────────────────────────────────────────────
+
+if [[ "$START_MAILPIT" == "1" ]]; then
+  if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${MAILPIT_CONTAINER}$"; then
+    echo "→ Mailpit already running ($MAILPIT_CONTAINER)"
+  else
+    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${MAILPIT_CONTAINER}$"; then
+      echo "→ Starting existing Mailpit container..."
+      docker start "$MAILPIT_CONTAINER" > /dev/null
+    else
+      echo "→ Creating Mailpit container..."
+      docker run -d \
+        --name "$MAILPIT_CONTAINER" \
+        -p "${MAILPIT_SMTP_PORT}:1025" \
+        -p "${MAILPIT_UI_PORT}:8025" \
+        "$MAILPIT_IMAGE" > /dev/null
+    fi
+    echo -n "→ Waiting for Mailpit..."
+    for _ in $(seq 1 20); do
+      curl -sf "http://localhost:${MAILPIT_UI_PORT}/api/v1/info" > /dev/null 2>&1 && break
+      echo -n "."
+      sleep 1
+    done
+    echo " ready."
+  fi
+fi
+
+# ── Keycloak ──────────────────────────────────────────────────────────────────
+
+if [[ "$START_KEYCLOAK" == "1" ]]; then
+  if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${KEYCLOAK_CONTAINER}$"; then
+    echo "→ Keycloak already running ($KEYCLOAK_CONTAINER)"
+  else
+    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${KEYCLOAK_CONTAINER}$"; then
+      echo "→ Starting existing Keycloak container..."
+      docker start "$KEYCLOAK_CONTAINER" > /dev/null
+    else
+      echo "→ Creating Keycloak container (first boot takes ~30 s)..."
+      docker run -d \
+        --name "$KEYCLOAK_CONTAINER" \
+        -p "${KEYCLOAK_PORT}:8080" \
+        -e KC_BOOTSTRAP_ADMIN_USERNAME="$KEYCLOAK_ADMIN" \
+        -e KC_BOOTSTRAP_ADMIN_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD" \
+        -v "${REPO_ROOT}/dev/keycloak:/opt/keycloak/data/import:ro" \
+        "$KEYCLOAK_IMAGE" \
+        start-dev --import-realm > /dev/null
+    fi
+    echo -n "→ Waiting for Keycloak realm to be ready (this may take ~40 s on first boot)..."
+    for _ in $(seq 1 60); do
+      if curl -sf "http://localhost:${KEYCLOAK_PORT}/realms/orkestra/.well-known/openid-configuration" > /dev/null 2>&1; then
+        break
+      fi
+      echo -n "."
+      sleep 2
+    done
+    if ! curl -sf "http://localhost:${KEYCLOAK_PORT}/realms/orkestra/.well-known/openid-configuration" > /dev/null 2>&1; then
+      echo ""
+      echo "✗ Keycloak did not become ready in time. Check: docker logs $KEYCLOAK_CONTAINER"
+      exit 1
+    fi
+    echo " ready."
+  fi
 fi
 
 # ── Build ─────────────────────────────────────────────────────────────────────
@@ -152,6 +252,16 @@ echo "│                                                  │"
 printf "│  UI:      http://localhost:%-22s│\n" "${UI_PORT}      "
 printf "│  Vite:    http://localhost:%-22s│\n" "${VITE_PORT}      "
 printf "│  Metrics: http://localhost:%-22s│\n" "${METRICS_PORT}/metrics  "
+
+if [[ "$START_MAILPIT" == "1" ]]; then
+  echo "│                                                  │"
+  printf "│  Mailpit: http://localhost:%-22s│\n" "${MAILPIT_UI_PORT}          "
+fi
+
+if [[ "$START_KEYCLOAK" == "1" ]]; then
+  printf "│  Keycloak: http://localhost:%-21s│\n" "${KEYCLOAK_PORT}         "
+fi
+
 echo "│                                                  │"
 echo "│  Ctrl+C to stop everything                      │"
 echo "└──────────────────────────────────────────────────┘"
@@ -160,6 +270,42 @@ if [[ -n "$SETUP_URL" ]]; then
   echo ""
   echo "  ★ First run — create your admin account:"
   echo "  $SETUP_URL"
+fi
+
+if [[ "$START_MAILPIT" == "1" ]]; then
+  echo ""
+  echo "┌─ Mailpit / Email settings ───────────────────────┐"
+  echo "│                                                  │"
+  echo "│  Settings → Email                                │"
+  echo "│    SMTP host:     localhost                      │"
+  printf "│    SMTP port:     %-31s│\n" "${MAILPIT_SMTP_PORT}"
+  echo "│    STARTTLS:      disabled                       │"
+  echo "│    From address:  orkestra@dev.local             │"
+  printf "│    Public URL:    http://localhost:%-14s│\n" "${UI_PORT}"
+  echo "│                                                  │"
+  printf "│  Inbox UI: http://localhost:%-22s│\n" "${MAILPIT_UI_PORT}"
+  echo "└──────────────────────────────────────────────────┘"
+fi
+
+if [[ "$START_KEYCLOAK" == "1" ]]; then
+  echo ""
+  echo "┌─ Keycloak / OIDC settings ───────────────────────┐"
+  echo "│                                                  │"
+  echo "│  Settings → OIDC                                 │"
+  printf "│    Issuer URL:   http://localhost:%d/realms/orkestra\n" "${KEYCLOAK_PORT}"
+  echo "│    Client ID:    orkestra                        │"
+  echo "│    Client secret: orkestra-dev-secret            │"
+  echo "│    Groups claim: groups                          │"
+  echo "│                                                  │"
+  echo "│  Role mapping (optional):                        │"
+  echo "│    Group 'orkestra-admins' → role 'admin'        │"
+  echo "│                                                  │"
+  echo "│  Test user: testuser@example.com / test          │"
+  echo "│  !! Pre-create this user in orkestra first !!    │"
+  echo "│                                                  │"
+  echo "│  Admin console: http://localhost:${KEYCLOAK_PORT}          │"
+  echo "│    login: ${KEYCLOAK_ADMIN} / ${KEYCLOAK_ADMIN_PASSWORD}                          │"
+  echo "└──────────────────────────────────────────────────┘"
 fi
 
 echo ""
