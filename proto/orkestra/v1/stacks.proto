@@ -30,6 +30,9 @@ service StackService {
   rpc UnassignStack(UnassignStackRequest)         returns (Empty);
   rpc RollbackStack(RollbackStackRequest)         returns (Assignment);
 
+  // Validate compose YAML without persisting (syntax + supported-field check)
+  rpc ValidateCompose(ValidateComposeRequest) returns (ValidateComposeResponse);
+
   // Container control (forwarded to Agent)
   rpc ExecOnContainer(ExecOnContainerRequest) returns (ExecOnContainerResponse);
 
@@ -160,6 +163,19 @@ message RollbackStackRequest {
   string server_id        = 1;
   string stack_id         = 2;
   string stack_version_id = 3; // target version to roll back to
+}
+
+message ValidateComposeRequest {
+  string compose_yaml = 1;
+}
+
+message ValidateComposeDiagnostic {
+  string severity = 1; // "error" | "warning"
+  string message  = 2;
+}
+
+message ValidateComposeResponse {
+  repeated ValidateComposeDiagnostic diagnostics = 1;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

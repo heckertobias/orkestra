@@ -8,6 +8,8 @@ import (
 
 	composetypes "github.com/compose-spec/compose-go/v2/types"
 	"gopkg.in/yaml.v3"
+
+	sharedcompose "github.com/heckertobias/orkestra/internal/shared/compose"
 )
 
 // LoadProject parses a Compose YAML string into a compose-go Project.
@@ -36,30 +38,15 @@ func LoadProject(composeYAML string, stackID string, envVars map[string]string) 
 
 // ValidateCompose parses the given YAML and returns a human-readable list of
 // unsupported fields, or nil if the compose is valid for orkestra's MVP field matrix.
+// Delegates to the shared implementation.
 func ValidateCompose(_ context.Context, composeYAML string) []string {
-	var raw map[string]interface{}
-	if err := yaml.Unmarshal([]byte(composeYAML), &raw); err != nil {
-		return []string{fmt.Sprintf("YAML parse error: %v", err)}
+	diags := sharedcompose.ValidateCompose(composeYAML)
+	if len(diags) == 0 {
+		return nil
 	}
-	var warnings []string
-	// Unsupported top-level keys for MVP.
-	unsupported := []string{"configs", "extensions"}
-	services, _ := raw["services"].(map[string]interface{})
-	for _, svcRaw := range services {
-		svc, ok := svcRaw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		for _, field := range []string{"deploy", "profiles", "links", "external_links", "scale"} {
-			if _, has := svc[field]; has {
-				warnings = append(warnings, fmt.Sprintf("field %q is not supported in MVP — it will be ignored", field))
-			}
-		}
+	msgs := make([]string, len(diags))
+	for i, d := range diags {
+		msgs[i] = d.Message
 	}
-	for _, k := range unsupported {
-		if _, has := raw[k]; has {
-			warnings = append(warnings, fmt.Sprintf("top-level key %q is not supported and will be ignored", k))
-		}
-	}
-	return warnings
+	return msgs
 }

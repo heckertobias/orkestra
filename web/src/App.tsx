@@ -6,6 +6,7 @@ import { ServersPage } from './pages/ServersPage'
 import { ServerDetailPage } from './pages/ServerDetailPage'
 import { StacksPage } from './pages/StacksPage'
 import { StackDetailPage } from './pages/StackDetailPage'
+import { StackEditorPage } from './pages/StackEditorPage'
 import { SecretsPage } from './pages/SecretsPage'
 import { LoginPage } from './pages/LoginPage'
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
@@ -46,8 +47,10 @@ export default function App() {
                 <Route index element={<DashboardPage />} />
                 <Route path="servers" element={<ServersPage />} />
                 <Route path="servers/:id" element={<ServerDetailPage />} />
-                <Route path="stacks"      element={<StacksPage />} />
-                <Route path="stacks/:id"  element={<StackDetailPage />} />
+                <Route path="stacks"          element={<StacksPage />} />
+                <Route path="stacks/new"      element={<StackEditorPage />} />
+                <Route path="stacks/:id"      element={<StackDetailPage />} />
+                <Route path="stacks/:id/edit" element={<StackEditorPage />} />
                 <Route path="secrets"  element={<SecretsPage />} />
                 <Route path="users"    element={<UsersPage />} />
                 <Route path="audit"    element={<AuditLogPage />} />

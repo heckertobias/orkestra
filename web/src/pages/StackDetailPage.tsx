@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft } from 'lucide-react'
+import { useParams, Link, useNavigate } from 'react-router-dom'
+import { ArrowLeft, Pencil } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 
 interface StackVersion {
@@ -8,6 +8,7 @@ interface StackVersion {
   version: number
   createdAt: number
   composeYaml: string
+  envVars: Record<string, string>
 }
 
 interface Stack {
@@ -19,6 +20,7 @@ interface Stack {
 
 export function StackDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [stack, setStack] = useState<Stack | null>(null)
   const [versions, setVersions] = useState<StackVersion[]>([])
   const [selected, setSelected] = useState<StackVersion | null>(null)
@@ -46,6 +48,7 @@ export function StackDetailPage() {
           version:     Number(v.version ?? 0),
           createdAt:   Number(v.createdAt ?? v.created_at ?? 0),
           composeYaml: String(v.composeYaml ?? v.compose_yaml ?? ''),
+          envVars:     (v.envVars ?? v.env_vars ?? {}) as Record<string, string>,
         }))
         setVersions(vs)
         if (vs.length > 0) setSelected(vs[0])
@@ -53,6 +56,8 @@ export function StackDetailPage() {
     }
     load()
   }, [id])
+
+  const envEntries = selected ? Object.entries(selected.envVars ?? {}) : []
 
   return (
     <div>
@@ -63,6 +68,13 @@ export function StackDetailPage() {
       <div className="flex items-center gap-3 mb-6">
         <h1 className="text-xl font-semibold" style={{ color: 'var(--text)' }}>{stack?.name ?? id}</h1>
         {stack && stack.version > 0 && <Badge>v{stack.version}</Badge>}
+        <button
+          onClick={() => navigate(`/stacks/${id}/edit`)}
+          className="flex items-center gap-1.5 ml-auto px-3 py-1.5 rounded border text-sm transition-colors hover:bg-[var(--surface-2)]"
+          style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+        >
+          <Pencil size={14} /> Edit
+        </button>
       </div>
 
       {stack?.description && (
@@ -95,15 +107,44 @@ export function StackDetailPage() {
           </div>
         </div>
 
-        {/* Compose YAML viewer */}
-        <div className="col-span-2">
-          <h2 className="font-medium text-sm mb-2" style={{ color: 'var(--text-muted)' }}>
-            {selected ? `compose.yaml — v${selected.version}` : 'compose.yaml'}
-          </h2>
-          <pre className="rounded-lg border p-4 text-xs font-mono overflow-auto max-h-96"
-            style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)', color: 'var(--text)' }}>
-            {selected?.composeYaml || 'Select a version to view its compose YAML.'}
-          </pre>
+        {/* Compose YAML viewer + Env Vars */}
+        <div className="col-span-2 space-y-4">
+          <div>
+            <h2 className="font-medium text-sm mb-2" style={{ color: 'var(--text-muted)' }}>
+              {selected ? `compose.yaml — v${selected.version}` : 'compose.yaml'}
+            </h2>
+            <pre className="rounded-lg border p-4 text-xs font-mono overflow-auto max-h-96"
+              style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)', color: 'var(--text)' }}>
+              {selected?.composeYaml || 'Select a version to view its compose YAML.'}
+            </pre>
+          </div>
+
+          {/* Env Vars for selected version */}
+          {envEntries.length > 0 && (
+            <div>
+              <h2 className="font-medium text-sm mb-2" style={{ color: 'var(--text-muted)' }}>
+                Env Variables — v{selected?.version}
+              </h2>
+              <div className="rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                      <th className="text-left px-3 py-2 font-medium" style={{ color: 'var(--text-muted)' }}>Key</th>
+                      <th className="text-left px-3 py-2 font-medium" style={{ color: 'var(--text-muted)' }}>Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {envEntries.map(([k, v]) => (
+                      <tr key={k} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td className="px-3 py-1.5 font-mono" style={{ color: 'var(--accent)' }}>{k}</td>
+                        <td className="px-3 py-1.5 font-mono" style={{ color: 'var(--text)' }}>{v || <span style={{ color: 'var(--text-muted)' }}>(empty)</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

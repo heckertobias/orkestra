@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -101,6 +102,7 @@ func (h *StackServiceHandler) UpdateStack(ctx context.Context, req *connect.Requ
 		StackId:     r.Id,
 		Version:     int32(nextVer),
 		ComposeYaml: r.ComposeYaml,
+		EnvVars:     r.EnvVars,
 		CreatedAt:   now,
 	}), nil
 }
@@ -168,11 +170,13 @@ func (h *StackServiceHandler) ListStackVersions(ctx context.Context, req *connec
 	}
 	versions := make([]*orkestraV1.StackVersion, 0, len(rows))
 	for _, row := range rows {
+		ev := unmarshalEnvVars(row.EnvVars)
 		versions = append(versions, &orkestraV1.StackVersion{
 			Id:          row.ID,
 			StackId:     row.StackID,
 			Version:     int32(row.Version),
 			ComposeYaml: row.ComposeYaml,
+			EnvVars:     ev,
 			CreatedAt:   row.CreatedAt,
 		})
 	}
@@ -274,6 +278,19 @@ func stackFromRow(row store.Stack, version int32) *orkestraV1.Stack {
 }
 
 func envVarsToLabels(m map[string]string) map[string]string { return m }
+
+// unmarshalEnvVars parses JSONB env_vars from the DB into a proto map.
+// Returns nil (empty map in proto) on empty/null input.
+func unmarshalEnvVars(raw []byte) map[string]string {
+	if len(raw) == 0 || string(raw) == "null" || string(raw) == "{}" {
+		return nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil
+	}
+	return m
+}
 
 func ptrString(s string) *string {
 	if s == "" {
