@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Dev/test launcher: starts Postgres (Docker), builds the dev binary,
 # starts the Master and the Vite dev server.
-# All background processes are stopped when this script exits (Ctrl+C or process death).
+# All background processes AND Docker containers are removed when this script exits
+# (Ctrl+C or process death) — each run starts with a fresh database.
 # Copy .env.example → .env to override defaults.
 #
 # Optional services (off by default):
@@ -60,6 +61,11 @@ MAILPIT_SMTP_PORT="${ORKESTRA_DEV_MAILPIT_SMTP_PORT:-2525}"
 MAILPIT_UI_PORT="${ORKESTRA_DEV_MAILPIT_UI_PORT:-8025}"
 MAILPIT_IMAGE="${ORKESTRA_DEV_MAILPIT_IMAGE:-axllent/mailpit:latest}"
 
+# Dev admin — created automatically on every first run via the setup token
+DEV_ADMIN_EMAIL="${ORKESTRA_DEV_ADMIN_EMAIL:-admin@orkestra.local}"
+DEV_ADMIN_PASSWORD="${ORKESTRA_DEV_ADMIN_PASSWORD:-orkestra-dev}"
+COOKIE_JAR="/tmp/orkestra-dev-cookies.txt"
+
 MASTER_LOG="/tmp/orkestra-master.log"
 VITE_LOG="/tmp/orkestra-vite.log"
 
@@ -79,7 +85,12 @@ cleanup() {
   [[ -n "$MASTER_PID" ]] && kill "$MASTER_PID" 2>/dev/null || true
   [[ -n "$VITE_PID"   ]] && kill "$VITE_PID"   2>/dev/null || true
   wait 2>/dev/null || true
-  echo "→ Done. (Postgres, Keycloak and Mailpit containers left running.)"
+  echo "→ Removing dev containers..."
+  docker rm -f "$DB_CONTAINER" 2>/dev/null || true
+  if [[ "$START_MAILPIT"  == "1" ]]; then docker rm -f "$MAILPIT_CONTAINER"  2>/dev/null || true; fi
+  if [[ "$START_KEYCLOAK" == "1" ]]; then docker rm -f "$KEYCLOAK_CONTAINER" 2>/dev/null || true; fi
+  rm -f "$COOKIE_JAR"
+  echo "→ Done. (All dev containers removed — next start gets a fresh DB.)"
 }
 trap cleanup EXIT INT TERM
 
@@ -228,6 +239,78 @@ for _ in $(seq 1 30); do
 done
 echo " ready."
 
+# ── Auto-configure dev instance ───────────────────────────────────────────────
+# Uses the first-run setup token from the master log to create the dev admin,
+# then applies Mailpit / Keycloak settings via the admin API.
+
+auto_configure() {
+  # Extract the setup token — slog format: "... url=http://…/login?setup=TOKEN"
+  local setup_token
+  setup_token="$(grep -o 'setup=[^ "]*' "$MASTER_LOG" 2>/dev/null | head -1 | sed 's/setup=//' || true)"
+
+  if [[ -z "$setup_token" ]]; then
+    echo "  ⚠ No setup token found in master log — skipping auto-config"
+    return 0
+  fi
+
+  # Create the dev admin account
+  echo "  → Creating dev admin (${DEV_ADMIN_EMAIL})..."
+  if ! curl -sf -X POST \
+      -H "Content-Type: application/json" \
+      -d "{\"token\":\"${setup_token}\",\"username\":\"${DEV_ADMIN_EMAIL}\",\"password\":\"${DEV_ADMIN_PASSWORD}\",\"displayName\":\"Dev Admin\"}" \
+      "http://localhost:${UI_PORT}/api/setup" > /dev/null; then
+    echo "  ⚠ /api/setup failed — skipping auto-config"
+    return 0
+  fi
+  echo "  ✓ Dev admin created"
+
+  # Log in and capture the session cookie
+  echo "  → Logging in..."
+  rm -f "$COOKIE_JAR"
+  if ! curl -sf -c "$COOKIE_JAR" \
+      -H "Content-Type: application/json" \
+      -H "Connect-Protocol-Version: 1" \
+      -d "{\"username\":\"${DEV_ADMIN_EMAIL}\",\"password\":\"${DEV_ADMIN_PASSWORD}\"}" \
+      "http://localhost:${UI_PORT}/orkestra.v1.AuthService/Login" > /dev/null; then
+    echo "  ⚠ Login failed — skipping service config"
+    return 0
+  fi
+  echo "  ✓ Logged in"
+
+  # Configure SMTP via Mailpit
+  if [[ "$START_MAILPIT" == "1" ]]; then
+    echo "  → Configuring SMTP (Mailpit on port ${MAILPIT_SMTP_PORT})..."
+    if curl -sf -b "$COOKIE_JAR" \
+        -H "Content-Type: application/json" \
+        -H "Connect-Protocol-Version: 1" \
+        -d "{\"enabled\":true,\"host\":\"localhost\",\"port\":${MAILPIT_SMTP_PORT},\"username\":\"\",\"password\":\"\",\"fromAddress\":\"orkestra@dev.local\",\"publicUrl\":\"http://localhost:${UI_PORT}\",\"starttls\":false}" \
+        "http://localhost:${UI_PORT}/orkestra.v1.AuthService/UpdateSMTPConfig" > /dev/null; then
+      echo "  ✓ SMTP configured"
+    else
+      echo "  ⚠ UpdateSMTPConfig failed — configure manually in Settings → Email"
+    fi
+  fi
+
+  # Configure OIDC via Keycloak
+  if [[ "$START_KEYCLOAK" == "1" ]]; then
+    echo "  → Configuring OIDC (Keycloak at http://localhost:${KEYCLOAK_PORT}/realms/orkestra)..."
+    if curl -sf -b "$COOKIE_JAR" \
+        -H "Content-Type: application/json" \
+        -H "Connect-Protocol-Version: 1" \
+        -d "{\"enabled\":true,\"issuerUrl\":\"http://localhost:${KEYCLOAK_PORT}/realms/orkestra\",\"clientId\":\"orkestra\",\"clientSecret\":\"orkestra-dev-secret\",\"groupsClaim\":\"groups\"}" \
+        "http://localhost:${UI_PORT}/orkestra.v1.AuthService/UpdateOIDCConfig" > /dev/null; then
+      echo "  ✓ OIDC configured"
+    else
+      echo "  ⚠ UpdateOIDCConfig failed — configure manually in Settings → OIDC"
+    fi
+  fi
+
+  echo "  ✓ Auto-configuration complete"
+}
+
+echo "→ Auto-configuring dev instance..."
+auto_configure
+
 # ── Vite ─────────────────────────────────────────────────────────────────────
 
 echo "→ Starting Vite dev server (logs → $VITE_LOG)"
@@ -242,8 +325,6 @@ if ! kill -0 "$VITE_PID" 2>/dev/null; then
 fi
 
 # ── Ready banner ──────────────────────────────────────────────────────────────
-
-SETUP_URL="$(grep -o 'url=http[^ ]*' "$MASTER_LOG" 2>/dev/null | head -1 | sed 's/url=//' | sed "s|0\.0\.0\.0|localhost|" || true)"
 
 echo ""
 echo "┌──────────────────────────────────────────────────┐"
@@ -266,45 +347,35 @@ echo "│                                                  │"
 echo "│  Ctrl+C to stop everything                      │"
 echo "└──────────────────────────────────────────────────┘"
 
-if [[ -n "$SETUP_URL" ]]; then
-  echo ""
-  echo "  ★ First run — create your admin account:"
-  echo "  $SETUP_URL"
-fi
+echo ""
+echo "┌─ Dev admin ──────────────────────────────────────┐"
+echo "│                                                  │"
+printf "│  Email:    %-38s│\n" "$DEV_ADMIN_EMAIL"
+printf "│  Password: %-38s│\n" "$DEV_ADMIN_PASSWORD"
+echo "│                                                  │"
+echo "└──────────────────────────────────────────────────┘"
 
 if [[ "$START_MAILPIT" == "1" ]]; then
   echo ""
-  echo "┌─ Mailpit / Email settings ───────────────────────┐"
+  echo "┌─ Mailpit (SMTP auto-configured) ─────────────────┐"
   echo "│                                                  │"
-  echo "│  Settings → Email                                │"
-  echo "│    SMTP host:     localhost                      │"
-  printf "│    SMTP port:     %-31s│\n" "${MAILPIT_SMTP_PORT}"
-  echo "│    STARTTLS:      disabled                       │"
-  echo "│    From address:  orkestra@dev.local             │"
-  printf "│    Public URL:    http://localhost:%-14s│\n" "${UI_PORT}"
+  printf "│  Inbox: http://localhost:%-24s│\n" "${MAILPIT_UI_PORT}"
   echo "│                                                  │"
-  printf "│  Inbox UI: http://localhost:%-22s│\n" "${MAILPIT_UI_PORT}"
+  echo "│  All outgoing emails are caught here.            │"
   echo "└──────────────────────────────────────────────────┘"
 fi
 
 if [[ "$START_KEYCLOAK" == "1" ]]; then
   echo ""
-  echo "┌─ Keycloak / OIDC settings ───────────────────────┐"
+  echo "┌─ Keycloak (OIDC auto-configured) ────────────────┐"
   echo "│                                                  │"
-  echo "│  Settings → OIDC                                 │"
-  printf "│    Issuer URL:   http://localhost:%d/realms/orkestra\n" "${KEYCLOAK_PORT}"
-  echo "│    Client ID:    orkestra                        │"
-  echo "│    Client secret: orkestra-dev-secret            │"
-  echo "│    Groups claim: groups                          │"
-  echo "│                                                  │"
-  echo "│  Role mapping (optional):                        │"
-  echo "│    Group 'orkestra-admins' → role 'admin'        │"
+  echo "│  SSO login enabled via Keycloak.                 │"
   echo "│                                                  │"
   echo "│  Test user: testuser@example.com / test          │"
   echo "│  !! Pre-create this user in orkestra first !!    │"
   echo "│                                                  │"
-  echo "│  Admin console: http://localhost:${KEYCLOAK_PORT}          │"
-  echo "│    login: ${KEYCLOAK_ADMIN} / ${KEYCLOAK_ADMIN_PASSWORD}                          │"
+  printf "│  Keycloak admin: http://localhost:%-15s│\n" "${KEYCLOAK_PORT}"
+  printf "│    login: %-39s│\n" "${KEYCLOAK_ADMIN} / ${KEYCLOAK_ADMIN_PASSWORD}"
   echo "└──────────────────────────────────────────────────┘"
 fi
 
