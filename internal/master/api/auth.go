@@ -29,6 +29,13 @@ import (
 
 const sessionTTL = 24 * time.Hour
 
+// adminInvariantLockKey is a stable Postgres advisory lock key that serializes
+// admin-mutating operations (user delete, account disable, admin role revoke) to
+// enforce the invariant that at least one enabled global admin always remains.
+// A per-request COUNT is not race-safe under READ COMMITTED; the advisory lock
+// makes the check-and-mutate atomic across concurrent requests.
+const adminInvariantLockKey int64 = 0x4F524B41444D494E // "ORKADMIN"
+
 // AuthServiceHandler implements the UI-facing AuthService RPCs.
 type AuthServiceHandler struct {
 	db         *pgxpool.Pool
@@ -354,19 +361,46 @@ func (h *AuthServiceHandler) UpdateUser(ctx context.Context, req *connect.Reques
 		}
 	}
 
-	row, err := h.q.UpdateUser(ctx, store.UpdateUserParams{
+	updateParams := store.UpdateUserParams{
 		ID:          req.Msg.Id,
 		Username:    newUsername,
 		DisplayName: ptrString(newDisplayName),
 		Disabled:    req.Msg.Disabled,
-	})
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("email address already in use"))
-		}
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update user: %w", err))
 	}
+
+	// Wrap with the admin-minimum guard only when actually disabling a currently
+	// enabled account, since that is the only path that can reduce the admin count.
+	doUpdate := func(q *store.Queries) (store.User, error) {
+		r, err := q.UpdateUser(ctx, updateParams)
+		if err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				return store.User{}, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("email address already in use"))
+			}
+			return store.User{}, connect.NewError(connect.CodeInternal, fmt.Errorf("update user: %w", err))
+		}
+		return r, nil
+	}
+
+	var row store.User
+	if req.Msg.Disabled && !target.Disabled {
+		// Disabling an enabled account could remove the last enabled global admin;
+		// enforce the invariant with an advisory-lock-protected transaction.
+		if err := h.withLastAdminGuard(ctx, req.Msg.Id, func(q *store.Queries) error {
+			var err error
+			row, err = doUpdate(q)
+			return err
+		}); err != nil {
+			return nil, err
+		}
+	} else {
+		var err error
+		row, err = doUpdate(h.q)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	roles, _ := h.q.GetUserRoles(ctx, row.ID)
 	bindings := h.loadUserBindings(ctx, row.ID)
 	return connect.NewResponse(userToProto(row, roles, bindings)), nil
@@ -496,8 +530,14 @@ func (h *AuthServiceHandler) DeleteUser(ctx context.Context, req *connect.Reques
 	}
 	// Load user info before deletion for the audit entry.
 	target, _ := h.q.GetUser(ctx, req.Msg.Id)
-	if err := h.q.DeleteUserByID(ctx, req.Msg.Id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete user: %w", err))
+	// Enforce admin-minimum invariant: refuse if deleting this user would leave
+	// zero enabled global admins. The advisory lock closes the concurrency gap
+	// where two admins could simultaneously delete each other — both passing the
+	// self-only guard — and both commit, leaving the system with no admins.
+	if err := h.withLastAdminGuard(ctx, req.Msg.Id, func(q *store.Queries) error {
+		return q.DeleteUserByID(ctx, req.Msg.Id)
+	}); err != nil {
+		return nil, err
 	}
 	if actor != nil {
 		detail := fmt.Sprintf("actor=%s target=%s", actor.Username, target.Username)
@@ -578,8 +618,7 @@ func (h *AuthServiceHandler) RevokeRole(ctx context.Context, req *connect.Reques
 	if err := requireRole(ctx, "admin"); err != nil {
 		return nil, err
 	}
-	// An admin may not revoke their OWN global admin role — analogous to the
-	// self-deletion guard in DeleteUser — ensuring at least one admin always remains.
+	// Self-guard: an admin may not revoke their own global admin role.
 	if actor := masterauth.UserFromContext(ctx); actor != nil {
 		mine, err := h.q.ListRoleBindingsByUser(ctx, actor.ID)
 		if err != nil {
@@ -592,8 +631,24 @@ func (h *AuthServiceHandler) RevokeRole(ctx context.Context, req *connect.Reques
 			}
 		}
 	}
-	if err := h.q.DeleteRoleBinding(ctx, req.Msg.BindingId); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("revoke role: %w", err))
+	// Look up the binding to determine whether it is a global admin binding.
+	// Only revoking a global admin binding can reduce the admin count; scoped or
+	// non-admin bindings are safe to delete without the invariant check.
+	binding, err := h.q.GetRoleBinding(ctx, req.Msg.BindingId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("role binding not found"))
+	}
+	if binding.RoleID == "role-admin" && binding.ServerID == nil && binding.StackID == nil {
+		// Enforce admin-minimum invariant via an advisory-lock-protected transaction.
+		if err := h.withLastAdminGuard(ctx, binding.UserID, func(q *store.Queries) error {
+			return q.DeleteRoleBinding(ctx, req.Msg.BindingId)
+		}); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := h.q.DeleteRoleBinding(ctx, req.Msg.BindingId); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("revoke role: %w", err))
+		}
 	}
 	return connect.NewResponse(&orkestraV1.AuthEmpty{}), nil
 }
@@ -1076,6 +1131,37 @@ func ipFromRequest(h http.Header) string {
 		return xff
 	}
 	return ""
+}
+
+// withLastAdminGuard runs fn inside a transaction protected by a Postgres advisory
+// transaction lock. Before calling fn it verifies that removing or disabling
+// userID would still leave at least one other enabled global admin; if not, it
+// returns CodeFailedPrecondition without calling fn. The lock serializes concurrent
+// admin-mutating requests so that two admins acting on each other simultaneously
+// cannot both pass the count check and both commit — leaving zero admins.
+func (h *AuthServiceHandler) withLastAdminGuard(ctx context.Context, userID string, fn func(q *store.Queries) error) error {
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("begin tx: %w", err))
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", adminInvariantLockKey); err != nil {
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("acquire admin lock: %w", err))
+	}
+	q := h.q.WithTx(tx)
+	remaining, err := q.CountEnabledGlobalAdminsExcludingUser(ctx, userID)
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("count admins: %w", err))
+	}
+	if remaining == 0 {
+		return connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("cannot remove the last enabled admin: at least one admin must remain"))
+	}
+	if err := fn(q); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func requireRole(ctx context.Context, roles ...string) error {

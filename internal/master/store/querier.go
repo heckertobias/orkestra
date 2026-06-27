@@ -9,6 +9,9 @@ import (
 )
 
 type Querier interface {
+	// Count enabled users with a global admin role binding, excluding the given user.
+	// Used to enforce the invariant that at least one enabled global admin always remains.
+	CountEnabledGlobalAdminsExcludingUser(ctx context.Context, id string) (int64, error)
 	CountSecretBindings(ctx context.Context, secretID string) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) error
@@ -24,6 +27,7 @@ type Querier interface {
 	GetOIDCConfig(ctx context.Context) (OidcConfig, error)
 	GetPasswordPolicy(ctx context.Context) (PasswordPolicy, error)
 	GetPasswordResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
+	GetRoleBinding(ctx context.Context, id string) (RoleBinding, error)
 	GetSMTPConfig(ctx context.Context) (SmtpConfig, error)
 	GetSecret(ctx context.Context, id string) (Secret, error)
 	GetServer(ctx context.Context, id string) (Server, error)

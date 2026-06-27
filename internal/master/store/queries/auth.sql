@@ -55,6 +55,9 @@ SELECT * FROM role_bindings WHERE user_id = $1 ORDER BY created_at;
 -- name: ListAllRoleBindings :many
 SELECT * FROM role_bindings ORDER BY created_at;
 
+-- name: GetRoleBinding :one
+SELECT * FROM role_bindings WHERE id = $1;
+
 -- name: InsertRoleBinding :one
 INSERT INTO role_bindings (id, user_id, role_id, server_id, stack_id, created_at)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -62,6 +65,17 @@ RETURNING *;
 
 -- name: DeleteRoleBinding :exec
 DELETE FROM role_bindings WHERE id = $1;
+
+-- name: CountEnabledGlobalAdminsExcludingUser :one
+-- Count enabled users with a global admin role binding, excluding the given user.
+-- Used to enforce the invariant that at least one enabled global admin always remains.
+SELECT COUNT(DISTINCT u.id) FROM users u
+JOIN role_bindings rb ON rb.user_id = u.id
+WHERE u.disabled = false
+  AND rb.role_id = 'role-admin'
+  AND rb.server_id IS NULL
+  AND rb.stack_id IS NULL
+  AND u.id <> $1;
 
 -- name: GetUserRoles :many
 SELECT r.name FROM role_bindings rb

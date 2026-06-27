@@ -9,6 +9,25 @@ import (
 	"context"
 )
 
+const countEnabledGlobalAdminsExcludingUser = `-- name: CountEnabledGlobalAdminsExcludingUser :one
+SELECT COUNT(DISTINCT u.id) FROM users u
+JOIN role_bindings rb ON rb.user_id = u.id
+WHERE u.disabled = false
+  AND rb.role_id = 'role-admin'
+  AND rb.server_id IS NULL
+  AND rb.stack_id IS NULL
+  AND u.id <> $1
+`
+
+// Count enabled users with a global admin role binding, excluding the given user.
+// Used to enforce the invariant that at least one enabled global admin always remains.
+func (q *Queries) CountEnabledGlobalAdminsExcludingUser(ctx context.Context, id string) (int64, error) {
+	row := q.db.QueryRow(ctx, countEnabledGlobalAdminsExcludingUser, id)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countUsers = `-- name: CountUsers :one
 SELECT COUNT(*) FROM users
 `
@@ -36,6 +55,24 @@ DELETE FROM users WHERE id = $1
 func (q *Queries) DeleteUserByID(ctx context.Context, id string) error {
 	_, err := q.db.Exec(ctx, deleteUserByID, id)
 	return err
+}
+
+const getRoleBinding = `-- name: GetRoleBinding :one
+SELECT id, user_id, role_id, server_id, stack_id, created_at FROM role_bindings WHERE id = $1
+`
+
+func (q *Queries) GetRoleBinding(ctx context.Context, id string) (RoleBinding, error) {
+	row := q.db.QueryRow(ctx, getRoleBinding, id)
+	var i RoleBinding
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.RoleID,
+		&i.ServerID,
+		&i.StackID,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const getSession = `-- name: GetSession :one
