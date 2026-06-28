@@ -172,6 +172,7 @@ message ValidateComposeRequest {
 message ValidateComposeDiagnostic {
   string severity = 1; // "error" | "warning"
   string message  = 2;
+  int32  line     = 3; // 1-based line in the source YAML; 0 = no specific position
 }
 
 message ValidateComposeResponse {

@@ -50,12 +50,23 @@ const composeSematicLinter = linter(async (view): Promise<Diagnostic[]> => {
     })
     if (!res.ok) return []
     const data = await res.json()
-    return (data.diagnostics ?? []).map((d: { severity: string; message: string }) => ({
-      from: 0,
-      to: Math.min(view.state.doc.line(1).to, view.state.doc.length),
-      severity: (d.severity === 'error' ? 'error' : 'warning') as 'error' | 'warning',
-      message: d.message,
-    }))
+    return (data.diagnostics ?? []).map((d: { severity: string; message: string; line?: number }) => {
+      const lineNum = d.line ?? 0
+      let from: number, to: number
+      if (lineNum > 0 && lineNum <= view.state.doc.lines) {
+        const lineInfo = view.state.doc.line(lineNum)
+        from = lineInfo.from
+        to = lineInfo.to
+      } else {
+        from = 0
+        to = Math.min(view.state.doc.line(1).to, view.state.doc.length)
+      }
+      return {
+        from, to,
+        severity: (d.severity === 'error' ? 'error' : 'warning') as 'error' | 'warning',
+        message: d.message,
+      }
+    })
   } catch {
     return []
   }

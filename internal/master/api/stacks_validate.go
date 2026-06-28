@@ -23,6 +23,7 @@ func (h *StackServiceHandler) ValidateCompose(
 		resp.Diagnostics = append(resp.Diagnostics, &orkestraV1.ValidateComposeDiagnostic{
 			Severity: string(d.Severity),
 			Message:  d.Message,
+			Line:     int32(d.Line),
 		})
 	}
 	return connect.NewResponse(resp), nil
