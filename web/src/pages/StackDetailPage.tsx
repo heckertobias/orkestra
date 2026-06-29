@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Pencil } from 'lucide-react'
+import { ArrowLeft, Pencil, Rocket } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { DeployStackDialog } from '@/components/DeployStackDialog'
+import { extractComposeVarDefaults } from '@/lib/env'
 
 interface StackVersion {
   id: string
   version: number
   createdAt: number
   composeYaml: string
-  envVars: Record<string, string>
+  envVarNames: string[]
 }
 
 interface Stack {
@@ -24,6 +26,7 @@ export function StackDetailPage() {
   const [stack, setStack] = useState<Stack | null>(null)
   const [versions, setVersions] = useState<StackVersion[]>([])
   const [selected, setSelected] = useState<StackVersion | null>(null)
+  const [deployOpen, setDeployOpen] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -48,7 +51,7 @@ export function StackDetailPage() {
           version:     Number(v.version ?? 0),
           createdAt:   Number(v.createdAt ?? v.created_at ?? 0),
           composeYaml: String(v.composeYaml ?? v.compose_yaml ?? ''),
-          envVars:     (v.envVars ?? v.env_vars ?? {}) as Record<string, string>,
+          envVarNames: (v.envVarNames ?? v.env_var_names ?? []) as string[],
         }))
         setVersions(vs)
         if (vs.length > 0) setSelected(vs[0])
@@ -57,7 +60,7 @@ export function StackDetailPage() {
     load()
   }, [id])
 
-  const envEntries = selected ? Object.entries(selected.envVars ?? {}) : []
+  const envNames = selected?.envVarNames ?? []
 
   return (
     <div>
@@ -68,14 +71,38 @@ export function StackDetailPage() {
       <div className="flex items-center gap-3 mb-6">
         <h1 className="text-xl font-semibold" style={{ color: 'var(--text)' }}>{stack?.name ?? id}</h1>
         {stack && stack.version > 0 && <Badge>v{stack.version}</Badge>}
-        <button
-          onClick={() => navigate(`/stacks/${id}/edit`)}
-          className="flex items-center gap-1.5 ml-auto px-3 py-1.5 rounded border text-sm transition-colors hover:bg-[var(--surface-2)]"
-          style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
-        >
-          <Pencil size={14} /> Edit
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setDeployOpen(true)}
+            disabled={versions.length === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors disabled:opacity-50"
+            style={{ backgroundColor: 'var(--accent)', color: '#0d1117' }}
+          >
+            <Rocket size={14} /> Deploy
+          </button>
+          <button
+            onClick={() => navigate(`/stacks/${id}/edit`)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded border text-sm transition-colors hover:bg-[var(--surface-2)]"
+            style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+          >
+            <Pencil size={14} /> Edit
+          </button>
+        </div>
       </div>
+
+      {deployOpen && stack && (
+        <DeployStackDialog
+          stackId={stack.id}
+          stackName={stack.name}
+          versions={versions.map(v => ({
+            id: v.id,
+            version: v.version,
+            envVarNames: v.envVarNames,
+            envDefaults: extractComposeVarDefaults(v.composeYaml),
+          }))}
+          onClose={() => setDeployOpen(false)}
+        />
+      )}
 
       {stack?.description && (
         <p className="mb-4 text-sm" style={{ color: 'var(--text-muted)' }}>{stack.description}</p>
@@ -119,30 +146,20 @@ export function StackDetailPage() {
             </pre>
           </div>
 
-          {/* Env Vars for selected version */}
-          {envEntries.length > 0 && (
+          {/* Required env vars for selected version (values are set at deploy time) */}
+          {envNames.length > 0 && (
             <div>
               <h2 className="font-medium text-sm mb-2" style={{ color: 'var(--text-muted)' }}>
-                Env Variables — v{selected?.version}
+                Required variables — v{selected?.version}
               </h2>
-              <div className="rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}>
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                      <th className="text-left px-3 py-2 font-medium" style={{ color: 'var(--text-muted)' }}>Key</th>
-                      <th className="text-left px-3 py-2 font-medium" style={{ color: 'var(--text-muted)' }}>Value</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {envEntries.map(([k, v]) => (
-                      <tr key={k} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td className="px-3 py-1.5 font-mono" style={{ color: 'var(--accent)' }}>{k}</td>
-                        <td className="px-3 py-1.5 font-mono" style={{ color: 'var(--text)' }}>{v || <span style={{ color: 'var(--text-muted)' }}>(empty)</span>}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="rounded-lg border p-3 flex flex-wrap gap-1.5" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}>
+                {envNames.map(n => (
+                  <code key={n} className="text-xs font-mono px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--bg)', color: 'var(--accent)' }}>{n}</code>
+                ))}
               </div>
+              <p className="text-xs mt-1.5" style={{ color: 'var(--text-muted)' }}>
+                Values are provided per server when you deploy.
+              </p>
             </div>
           )}
         </div>

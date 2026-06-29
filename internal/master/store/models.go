@@ -29,6 +29,7 @@ type Assignment struct {
 	DesiredStatus  string  `json:"desired_status"`
 	AssignedBy     *string `json:"assigned_by"`
 	AssignedAt     int64   `json:"assigned_at"`
+	EnvValues      []byte  `json:"env_values"`
 }
 
 type AuditLog struct {
@@ -219,7 +220,7 @@ type StackVersion struct {
 	StackID     string  `json:"stack_id"`
 	Version     int64   `json:"version"`
 	ComposeYaml string  `json:"compose_yaml"`
-	EnvVars     []byte  `json:"env_vars"`
+	EnvVarNames []byte  `json:"env_var_names"`
 	SecretRefs  []byte  `json:"secret_refs"`
 	CreatedBy   *string `json:"created_by"`
 	CreatedAt   int64   `json:"created_at"`

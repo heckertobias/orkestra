@@ -84,9 +84,11 @@ func (r *Reconciler) buildDesiredState(ctx context.Context, serverID string) (*o
 	for _, row := range rows {
 		status := desiredStatusFromString(row.DesiredStatus)
 
+		// Env-var values are supplied per-assignment (at deploy time), not by the
+		// stack version — which only declares the required names.
 		var envVars map[string]string
-		if row.EnvVars != nil {
-			_ = json.Unmarshal(row.EnvVars, &envVars)
+		if row.EnvValues != nil {
+			_ = json.Unmarshal(row.EnvValues, &envVars)
 		}
 		if envVars == nil {
 			envVars = make(map[string]string)

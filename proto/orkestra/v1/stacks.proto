@@ -93,14 +93,16 @@ message Stack {
 }
 
 message StackVersion {
-  string              id           = 1;
-  string              stack_id     = 2;
-  int32               version      = 3;
-  string              compose_yaml = 4;
-  map<string, string> env_vars     = 5;
-  repeated SecretRef  secret_refs  = 6;
-  string              created_by   = 7;
-  int64               created_at   = 8;
+  string              id            = 1;
+  string              stack_id      = 2;
+  int32               version       = 3;
+  string              compose_yaml  = 4;
+  // Names of env vars this version requires. Values are supplied per-assignment
+  // at deploy time (see AssignStackRequest.env_values), not stored here.
+  repeated string     env_var_names = 5;
+  repeated SecretRef  secret_refs   = 6;
+  string              created_by    = 7;
+  int64               created_at    = 8;
 }
 
 message SecretRef {
@@ -113,14 +115,15 @@ message SecretRef {
 }
 
 message Assignment {
-  string id               = 1;
-  string server_id        = 2;
-  string stack_id         = 3;
-  string stack_version_id = 4;
-  int32  version          = 5;
-  string desired_status   = 6; // running | stopped | removed
-  string assigned_by      = 7;
-  int64  assigned_at      = 8;
+  string              id               = 1;
+  string              server_id        = 2;
+  string              stack_id         = 3;
+  string              stack_version_id = 4;
+  int32               version          = 5;
+  string              desired_status   = 6; // running | stopped | removed
+  string              assigned_by      = 7;
+  int64               assigned_at      = 8;
+  map<string, string> env_values       = 9; // per-server values for the version's env_var_names
 }
 
 message ListStacksRequest  { bool include_deleted = 1; }
@@ -129,29 +132,30 @@ message GetStackRequest    { string id = 1; }
 message DeleteStackRequest { string id = 1; }
 
 message CreateStackRequest {
-  string              name         = 1;
-  string              description  = 2;
-  string              compose_yaml = 3;
-  map<string, string> env_vars     = 4;
-  repeated SecretRef  secret_refs  = 5;
+  string             name          = 1;
+  string             description   = 2;
+  string             compose_yaml  = 3;
+  repeated string    env_var_names = 4;
+  repeated SecretRef secret_refs   = 5;
 }
 
 message UpdateStackRequest {
-  string              id           = 1;
-  string              description  = 2; // optional — only metadata changes if compose_yaml empty
-  string              compose_yaml = 3;
-  map<string, string> env_vars     = 4;
-  repeated SecretRef  secret_refs  = 5;
+  string             id            = 1;
+  string             description   = 2; // optional — only metadata changes if compose_yaml empty
+  string             compose_yaml  = 3;
+  repeated string    env_var_names = 4;
+  repeated SecretRef secret_refs   = 5;
 }
 
 message ListStackVersionsRequest  { string stack_id = 1; }
 message ListStackVersionsResponse { repeated StackVersion versions = 1; }
 
 message AssignStackRequest {
-  string server_id        = 1;
-  string stack_id         = 2;
-  string stack_version_id = 3; // if empty, uses latest
-  string desired_status   = 4; // default: running
+  string              server_id        = 1;
+  string              stack_id         = 2;
+  string              stack_version_id = 3; // if empty, uses latest
+  string              desired_status   = 4; // default: running
+  map<string, string> env_values       = 5; // per-server values for the version's env_var_names
 }
 
 message UnassignStackRequest {

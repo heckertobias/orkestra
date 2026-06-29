@@ -84,6 +84,7 @@ func (h *StackServiceHandler) ListServers(ctx context.Context, req *connect.Requ
 					StackVersionId: a.StackVersionID,
 					DesiredStatus:  a.DesiredStatus,
 					AssignedAt:     a.AssignedAt,
+					EnvValues:      unmarshalEnvValues(a.EnvValues),
 				})
 			}
 		}

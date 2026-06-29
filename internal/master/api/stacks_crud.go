@@ -42,13 +42,12 @@ func (h *StackServiceHandler) CreateStack(ctx context.Context, req *connect.Requ
 
 	// Create initial version if compose YAML provided.
 	if r.ComposeYaml != "" {
-		envJSON, _ := labelsToJSON(envVarsToLabels(r.EnvVars))
 		_, err = h.q.InsertStackVersion(ctx, store.InsertStackVersionParams{
 			ID:          uuid.NewString(),
 			StackID:     stackID,
 			Version:     1,
 			ComposeYaml: r.ComposeYaml,
-			EnvVars:     envJSON,
+			EnvVarNames: marshalEnvVarNames(r.EnvVarNames),
 			SecretRefs:  []byte("[]"),
 			CreatedBy:   nil,
 			CreatedAt:   now,
@@ -74,7 +73,6 @@ func (h *StackServiceHandler) UpdateStack(ctx context.Context, req *connect.Requ
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("stack not found"))
 	}
-	envJSON, _ := labelsToJSON(envVarsToLabels(r.EnvVars))
 	versionID := uuid.NewString()
 	now := time.Now().UnixMilli()
 
@@ -83,7 +81,7 @@ func (h *StackServiceHandler) UpdateStack(ctx context.Context, req *connect.Requ
 		StackID:     r.Id,
 		Version:     int64(nextVer),
 		ComposeYaml: r.ComposeYaml,
-		EnvVars:     envJSON,
+		EnvVarNames: marshalEnvVarNames(r.EnvVarNames),
 		SecretRefs:  []byte("[]"),
 		CreatedBy:   nil,
 		CreatedAt:   now,
@@ -102,7 +100,7 @@ func (h *StackServiceHandler) UpdateStack(ctx context.Context, req *connect.Requ
 		StackId:     r.Id,
 		Version:     int32(nextVer),
 		ComposeYaml: r.ComposeYaml,
-		EnvVars:     r.EnvVars,
+		EnvVarNames: r.EnvVarNames,
 		CreatedAt:   now,
 	}), nil
 }
@@ -170,13 +168,12 @@ func (h *StackServiceHandler) ListStackVersions(ctx context.Context, req *connec
 	}
 	versions := make([]*orkestraV1.StackVersion, 0, len(rows))
 	for _, row := range rows {
-		ev := unmarshalEnvVars(row.EnvVars)
 		versions = append(versions, &orkestraV1.StackVersion{
 			Id:          row.ID,
 			StackId:     row.StackID,
 			Version:     int32(row.Version),
 			ComposeYaml: row.ComposeYaml,
-			EnvVars:     ev,
+			EnvVarNames: unmarshalEnvVarNames(row.EnvVarNames),
 			CreatedAt:   row.CreatedAt,
 		})
 	}
@@ -213,6 +210,7 @@ func (h *StackServiceHandler) AssignStack(ctx context.Context, req *connect.Requ
 		DesiredStatus:  status,
 		AssignedBy:     nil,
 		AssignedAt:     time.Now().UnixMilli(),
+		EnvValues:      marshalEnvValues(r.EnvValues),
 	})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("assign stack: %w", err))
@@ -229,6 +227,7 @@ func (h *StackServiceHandler) AssignStack(ctx context.Context, req *connect.Requ
 		StackVersionId: row.StackVersionID,
 		DesiredStatus:  row.DesiredStatus,
 		AssignedAt:     row.AssignedAt,
+		EnvValues:      unmarshalEnvValues(row.EnvValues),
 	}), nil
 }
 
@@ -251,13 +250,24 @@ func (h *StackServiceHandler) UnassignStack(ctx context.Context, req *connect.Re
 	return connect.NewResponse(&orkestraV1.Empty{}), nil
 }
 
-// RollbackStack reassigns to an older version.
+// RollbackStack reassigns to an older version, preserving the server's existing
+// per-assignment env values so a rollback doesn't wipe them.
 func (h *StackServiceHandler) RollbackStack(ctx context.Context, req *connect.Request[orkestraV1.RollbackStackRequest]) (*connect.Response[orkestraV1.Assignment], error) {
+	var envValues map[string]string
+	if existing, err := h.q.ListAssignmentsForStack(ctx, req.Msg.StackId); err == nil {
+		for _, a := range existing {
+			if a.ServerID == req.Msg.ServerId {
+				envValues = unmarshalEnvValues(a.EnvValues)
+				break
+			}
+		}
+	}
 	return h.AssignStack(ctx, connect.NewRequest(&orkestraV1.AssignStackRequest{
 		ServerId:       req.Msg.ServerId,
 		StackId:        req.Msg.StackId,
 		StackVersionId: req.Msg.StackVersionId,
 		DesiredStatus:  "running",
+		EnvValues:      envValues,
 	}))
 }
 
@@ -277,11 +287,45 @@ func stackFromRow(row store.Stack, version int32) *orkestraV1.Stack {
 	}
 }
 
-func envVarsToLabels(m map[string]string) map[string]string { return m }
+// marshalEnvVarNames encodes a list of required env-var names as a JSONB array.
+func marshalEnvVarNames(names []string) []byte {
+	if len(names) == 0 {
+		return []byte("[]")
+	}
+	b, err := json.Marshal(names)
+	if err != nil {
+		return []byte("[]")
+	}
+	return b
+}
 
-// unmarshalEnvVars parses JSONB env_vars from the DB into a proto map.
+// unmarshalEnvVarNames parses a JSONB array of env-var names from the DB.
+func unmarshalEnvVarNames(raw []byte) []string {
+	if len(raw) == 0 || string(raw) == "null" || string(raw) == "[]" {
+		return nil
+	}
+	var names []string
+	if err := json.Unmarshal(raw, &names); err != nil {
+		return nil
+	}
+	return names
+}
+
+// marshalEnvValues encodes per-assignment env values as a JSONB object.
+func marshalEnvValues(m map[string]string) []byte {
+	if len(m) == 0 {
+		return []byte("{}")
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return []byte("{}")
+	}
+	return b
+}
+
+// unmarshalEnvValues parses a JSONB object of per-assignment env values.
 // Returns nil (empty map in proto) on empty/null input.
-func unmarshalEnvVars(raw []byte) map[string]string {
+func unmarshalEnvValues(raw []byte) map[string]string {
 	if len(raw) == 0 || string(raw) == "null" || string(raw) == "{}" {
 		return nil
 	}

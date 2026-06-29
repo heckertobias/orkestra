@@ -24,7 +24,7 @@ func (q *Queries) DeleteAssignment(ctx context.Context, arg DeleteAssignmentPara
 }
 
 const getLatestStackVersion = `-- name: GetLatestStackVersion :one
-SELECT id, stack_id, version, compose_yaml, env_vars, secret_refs, created_by, created_at FROM stack_versions WHERE stack_id = $1 ORDER BY version DESC LIMIT 1
+SELECT id, stack_id, version, compose_yaml, env_var_names, secret_refs, created_by, created_at FROM stack_versions WHERE stack_id = $1 ORDER BY version DESC LIMIT 1
 `
 
 func (q *Queries) GetLatestStackVersion(ctx context.Context, stackID string) (StackVersion, error) {
@@ -35,7 +35,7 @@ func (q *Queries) GetLatestStackVersion(ctx context.Context, stackID string) (St
 		&i.StackID,
 		&i.Version,
 		&i.ComposeYaml,
-		&i.EnvVars,
+		&i.EnvVarNames,
 		&i.SecretRefs,
 		&i.CreatedBy,
 		&i.CreatedAt,
@@ -73,7 +73,7 @@ func (q *Queries) GetStack(ctx context.Context, id string) (Stack, error) {
 }
 
 const getStackVersion = `-- name: GetStackVersion :one
-SELECT id, stack_id, version, compose_yaml, env_vars, secret_refs, created_by, created_at FROM stack_versions WHERE id = $1
+SELECT id, stack_id, version, compose_yaml, env_var_names, secret_refs, created_by, created_at FROM stack_versions WHERE id = $1
 `
 
 func (q *Queries) GetStackVersion(ctx context.Context, id string) (StackVersion, error) {
@@ -84,7 +84,7 @@ func (q *Queries) GetStackVersion(ctx context.Context, id string) (StackVersion,
 		&i.StackID,
 		&i.Version,
 		&i.ComposeYaml,
-		&i.EnvVars,
+		&i.EnvVarNames,
 		&i.SecretRefs,
 		&i.CreatedBy,
 		&i.CreatedAt,
@@ -127,9 +127,9 @@ func (q *Queries) InsertStack(ctx context.Context, arg InsertStackParams) (Stack
 }
 
 const insertStackVersion = `-- name: InsertStackVersion :one
-INSERT INTO stack_versions (id, stack_id, version, compose_yaml, env_vars, secret_refs, created_by, created_at)
+INSERT INTO stack_versions (id, stack_id, version, compose_yaml, env_var_names, secret_refs, created_by, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, stack_id, version, compose_yaml, env_vars, secret_refs, created_by, created_at
+RETURNING id, stack_id, version, compose_yaml, env_var_names, secret_refs, created_by, created_at
 `
 
 type InsertStackVersionParams struct {
@@ -137,7 +137,7 @@ type InsertStackVersionParams struct {
 	StackID     string  `json:"stack_id"`
 	Version     int64   `json:"version"`
 	ComposeYaml string  `json:"compose_yaml"`
-	EnvVars     []byte  `json:"env_vars"`
+	EnvVarNames []byte  `json:"env_var_names"`
 	SecretRefs  []byte  `json:"secret_refs"`
 	CreatedBy   *string `json:"created_by"`
 	CreatedAt   int64   `json:"created_at"`
@@ -149,7 +149,7 @@ func (q *Queries) InsertStackVersion(ctx context.Context, arg InsertStackVersion
 		arg.StackID,
 		arg.Version,
 		arg.ComposeYaml,
-		arg.EnvVars,
+		arg.EnvVarNames,
 		arg.SecretRefs,
 		arg.CreatedBy,
 		arg.CreatedAt,
@@ -160,7 +160,7 @@ func (q *Queries) InsertStackVersion(ctx context.Context, arg InsertStackVersion
 		&i.StackID,
 		&i.Version,
 		&i.ComposeYaml,
-		&i.EnvVars,
+		&i.EnvVarNames,
 		&i.SecretRefs,
 		&i.CreatedBy,
 		&i.CreatedAt,
@@ -169,7 +169,7 @@ func (q *Queries) InsertStackVersion(ctx context.Context, arg InsertStackVersion
 }
 
 const listAssignmentsForServer = `-- name: ListAssignmentsForServer :many
-SELECT a.id, a.server_id, a.stack_id, a.stack_version_id, a.desired_status, a.assigned_by, a.assigned_at, sv.compose_yaml, sv.env_vars, sv.secret_refs
+SELECT a.id, a.server_id, a.stack_id, a.stack_version_id, a.desired_status, a.assigned_by, a.assigned_at, a.env_values, sv.compose_yaml, sv.secret_refs
 FROM assignments a
 JOIN stack_versions sv ON sv.id = a.stack_version_id
 WHERE a.server_id = $1
@@ -183,8 +183,8 @@ type ListAssignmentsForServerRow struct {
 	DesiredStatus  string  `json:"desired_status"`
 	AssignedBy     *string `json:"assigned_by"`
 	AssignedAt     int64   `json:"assigned_at"`
+	EnvValues      []byte  `json:"env_values"`
 	ComposeYaml    string  `json:"compose_yaml"`
-	EnvVars        []byte  `json:"env_vars"`
 	SecretRefs     []byte  `json:"secret_refs"`
 }
 
@@ -205,8 +205,8 @@ func (q *Queries) ListAssignmentsForServer(ctx context.Context, serverID string)
 			&i.DesiredStatus,
 			&i.AssignedBy,
 			&i.AssignedAt,
+			&i.EnvValues,
 			&i.ComposeYaml,
-			&i.EnvVars,
 			&i.SecretRefs,
 		); err != nil {
 			return nil, err
@@ -220,7 +220,7 @@ func (q *Queries) ListAssignmentsForServer(ctx context.Context, serverID string)
 }
 
 const listAssignmentsForStack = `-- name: ListAssignmentsForStack :many
-SELECT id, server_id, stack_id, stack_version_id, desired_status, assigned_by, assigned_at FROM assignments WHERE stack_id = $1
+SELECT id, server_id, stack_id, stack_version_id, desired_status, assigned_by, assigned_at, env_values FROM assignments WHERE stack_id = $1
 `
 
 func (q *Queries) ListAssignmentsForStack(ctx context.Context, stackID string) ([]Assignment, error) {
@@ -240,6 +240,7 @@ func (q *Queries) ListAssignmentsForStack(ctx context.Context, stackID string) (
 			&i.DesiredStatus,
 			&i.AssignedBy,
 			&i.AssignedAt,
+			&i.EnvValues,
 		); err != nil {
 			return nil, err
 		}
@@ -252,7 +253,7 @@ func (q *Queries) ListAssignmentsForStack(ctx context.Context, stackID string) (
 }
 
 const listStackVersions = `-- name: ListStackVersions :many
-SELECT id, stack_id, version, compose_yaml, env_vars, secret_refs, created_by, created_at FROM stack_versions WHERE stack_id = $1 ORDER BY version DESC
+SELECT id, stack_id, version, compose_yaml, env_var_names, secret_refs, created_by, created_at FROM stack_versions WHERE stack_id = $1 ORDER BY version DESC
 `
 
 func (q *Queries) ListStackVersions(ctx context.Context, stackID string) ([]StackVersion, error) {
@@ -269,7 +270,7 @@ func (q *Queries) ListStackVersions(ctx context.Context, stackID string) ([]Stac
 			&i.StackID,
 			&i.Version,
 			&i.ComposeYaml,
-			&i.EnvVars,
+			&i.EnvVarNames,
 			&i.SecretRefs,
 			&i.CreatedBy,
 			&i.CreatedAt,
@@ -330,14 +331,15 @@ func (q *Queries) SoftDeleteStack(ctx context.Context, arg SoftDeleteStackParams
 }
 
 const upsertAssignment = `-- name: UpsertAssignment :one
-INSERT INTO assignments (id, server_id, stack_id, stack_version_id, desired_status, assigned_by, assigned_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO assignments (id, server_id, stack_id, stack_version_id, desired_status, assigned_by, assigned_at, env_values)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT(server_id, stack_id) DO UPDATE SET
     stack_version_id = excluded.stack_version_id,
     desired_status   = excluded.desired_status,
     assigned_by      = excluded.assigned_by,
-    assigned_at      = excluded.assigned_at
-RETURNING id, server_id, stack_id, stack_version_id, desired_status, assigned_by, assigned_at
+    assigned_at      = excluded.assigned_at,
+    env_values       = excluded.env_values
+RETURNING id, server_id, stack_id, stack_version_id, desired_status, assigned_by, assigned_at, env_values
 `
 
 type UpsertAssignmentParams struct {
@@ -348,6 +350,7 @@ type UpsertAssignmentParams struct {
 	DesiredStatus  string  `json:"desired_status"`
 	AssignedBy     *string `json:"assigned_by"`
 	AssignedAt     int64   `json:"assigned_at"`
+	EnvValues      []byte  `json:"env_values"`
 }
 
 func (q *Queries) UpsertAssignment(ctx context.Context, arg UpsertAssignmentParams) (Assignment, error) {
@@ -359,6 +362,7 @@ func (q *Queries) UpsertAssignment(ctx context.Context, arg UpsertAssignmentPara
 		arg.DesiredStatus,
 		arg.AssignedBy,
 		arg.AssignedAt,
+		arg.EnvValues,
 	)
 	var i Assignment
 	err := row.Scan(
@@ -369,6 +373,7 @@ func (q *Queries) UpsertAssignment(ctx context.Context, arg UpsertAssignmentPara
 		&i.DesiredStatus,
 		&i.AssignedBy,
 		&i.AssignedAt,
+		&i.EnvValues,
 	)
 	return i, err
 }

@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Download, Plus, Trash2, Upload } from 'lucide-react'
 import CodeMirror from '@uiw/react-codemirror'
 import { yaml } from '@codemirror/lang-yaml'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { linter, lintGutter, type Diagnostic } from '@codemirror/lint'
+import { keymap } from '@codemirror/view'
+import { Prec } from '@codemirror/state'
 import * as jsyaml from 'js-yaml'
 import { downloadText, readTextFile } from '@/lib/files'
-import { extractComposeVars, toDotEnv } from '@/lib/env'
+import { extractComposeVars, extractComposeVarDefaults, toDotEnv, renameComposeVar, removeComposeVar } from '@/lib/env'
 
 // ── CodeMirror linters ────────────────────────────────────────────────────────
 
@@ -72,25 +74,48 @@ const composeSematicLinter = linter(async (view): Promise<Diagnostic[]> => {
   }
 }, { delay: 600 })
 
-const cmExtensions = [yaml(), yamlSyntaxLinter, composeSematicLinter, lintGutter()]
+/**
+ * Custom Enter handler implementing simple YAML auto-indent: a line ending in
+ * `:` indents the next line one level deeper (2 spaces); otherwise the new line
+ * keeps the current indentation. High precedence so it runs before CodeMirror's
+ * default newline-and-indent.
+ */
+const yamlAutoIndent = Prec.high(keymap.of([{
+  key: 'Enter',
+  run: (view) => {
+    const { state } = view
+    const { from, to } = state.selection.main
+    if (from !== to) return false // let default handle non-empty selections
+    const line = state.doc.lineAt(from)
+    const indent = (line.text.match(/^[ \t]*/) ?? [''])[0]
+    const beforeCursor = line.text.slice(0, from - line.from)
+    const trimmed = beforeCursor.replace(/\s+#.*$/, '').trimEnd()
+    const newIndent = trimmed.endsWith(':') ? indent + '  ' : indent
+    const insert = '\n' + newIndent
+    view.dispatch({
+      changes: { from, to, insert },
+      selection: { anchor: from + insert.length },
+      scrollIntoView: true,
+    })
+    return true
+  },
+}]))
+
+const cmExtensions = [yamlAutoIndent, yaml(), yamlSyntaxLinter, composeSematicLinter, lintGutter()]
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface EnvRow {
-  key: string
-  value: string
+/** An entry in the env-var list. `manual` entries persist regardless of the
+ *  compose YAML; non-manual entries are derived from `${VAR}` references and are
+ *  removed automatically when their reference leaves the YAML. */
+interface EnvVar {
+  id: string
+  name: string
+  manual: boolean
 }
 
-function envRowsToMap(rows: EnvRow[]): Record<string, string> {
-  const m: Record<string, string> = {}
-  for (const r of rows) {
-    if (r.key.trim()) m[r.key.trim()] = r.value
-  }
-  return m
-}
-
-function mapToEnvRows(m: Record<string, string>): EnvRow[] {
-  return Object.entries(m).map(([key, value]) => ({ key, value }))
+function newEnvVar(name: string, manual: boolean): EnvVar {
+  return { id: crypto.randomUUID(), name, manual }
 }
 
 export function StackEditorPage() {
@@ -101,7 +126,7 @@ export function StackEditorPage() {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [composeYaml, setComposeYaml] = useState('')
-  const [envRows, setEnvRows] = useState<EnvRow[]>([])
+  const [envVars, setEnvVars] = useState<EnvVar[]>([])
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(isEdit)
   const [error, setError] = useState<string | null>(null)
@@ -139,9 +164,13 @@ export function StackEditorPage() {
         // versions are returned newest-first
         const latest = versions[0]
         if (latest) {
-          setComposeYaml(String(latest.composeYaml ?? latest.compose_yaml ?? ''))
-          const ev = (latest.envVars ?? latest.env_vars ?? {}) as Record<string, string>
-          setEnvRows(mapToEnvRows(ev))
+          const yamlText = String(latest.composeYaml ?? latest.compose_yaml ?? '')
+          setComposeYaml(yamlText)
+          const names = (latest.envVarNames ?? latest.env_var_names ?? []) as string[]
+          const referenced = new Set(extractComposeVars(yamlText))
+          // Names not currently referenced in the YAML are treated as manual;
+          // referenced ones are re-derived (and kept in sync) from the YAML.
+          setEnvVars(names.map(n => newEnvVar(n, !referenced.has(n))))
         }
       }
       setLoading(false)
@@ -157,7 +186,7 @@ export function StackEditorPage() {
     const file = e.target.files?.[0]
     if (!file) return
     const text = await readTextFile(file)
-    setComposeYaml(text)
+    setYaml(text)
     // reset so the same file can be re-selected
     e.target.value = ''
   }
@@ -168,31 +197,75 @@ export function StackEditorPage() {
 
   // ── Env var helpers ────────────────────────────────────────────────────────
 
-  function addEnvRow() {
-    setEnvRows(r => [...r, { key: '', value: '' }])
+  const referencedVars = useMemo(() => extractComposeVars(composeYaml), [composeYaml])
+  const referencedSet = useMemo(() => new Set(referencedVars), [referencedVars])
+  const referencedDefaults = useMemo(() => extractComposeVarDefaults(composeYaml), [composeYaml])
+
+  // Display order: referenced entries first, then manual, alphabetical within each
+  // group. Sorted view only — state order stays stable for reconcile().
+  const displayVars = useMemo(
+    () => [...envVars].sort((a, b) => {
+      const ar = a.name.trim() !== '' && referencedSet.has(a.name) ? 0 : 1
+      const br = b.name.trim() !== '' && referencedSet.has(b.name) ? 0 : 1
+      if (ar !== br) return ar - br
+      // empty (freshly-added, unnamed) rows sort to the bottom of their group
+      if (!a.name) return 1
+      if (!b.name) return -1
+      return a.name.localeCompare(b.name)
+    }),
+    [envVars, referencedSet],
+  )
+
+  // Reconcile a var list against the set of names referenced in the YAML:
+  // keep manual entries + still-referenced ones, append newly-referenced names.
+  function reconcile(list: EnvVar[], refNames: string[]): EnvVar[] {
+    const refSet = new Set(refNames)
+    const present = new Set(list.map(v => v.name))
+    const kept = list.filter(v => v.manual || refSet.has(v.name))
+    const added = refNames.filter(n => !present.has(n)).map(n => newEnvVar(n, false))
+    return kept.length === list.length && added.length === 0 ? list : [...kept, ...added]
   }
 
-  function removeEnvRow(idx: number) {
-    setEnvRows(r => r.filter((_, i) => i !== idx))
+  // Single entry point for YAML changes — updates the editor and keeps the
+  // var list in sync (so `${VAR}` references appear/disappear automatically).
+  function setYaml(next: string) {
+    setComposeYaml(next)
+    setEnvVars(prev => reconcile(prev, extractComposeVars(next)))
   }
 
-  function patchEnvRow(idx: number, patch: Partial<EnvRow>) {
-    setEnvRows(r => r.map((row, i) => i === idx ? { ...row, ...patch } : row))
+  function addVar() {
+    setEnvVars(v => [...v, newEnvVar('', true)])
+  }
+
+  function renameVar(id: string, nextName: string) {
+    const cur = envVars.find(v => v.id === id)
+    if (!cur) return
+    // If the old name is a live `${VAR}` reference, rewrite it in the YAML too.
+    const rewrite = !!cur.name && cur.name !== nextName && referencedSet.has(cur.name)
+    const newYaml = rewrite ? renameComposeVar(composeYaml, cur.name, nextName) : composeYaml
+    const refNames = extractComposeVars(newYaml)
+    setEnvVars(prev => reconcile(prev.map(v => v.id === id ? { ...v, name: nextName } : v), refNames))
+    if (rewrite) setComposeYaml(newYaml)
+  }
+
+  function removeVar(id: string) {
+    const cur = envVars.find(v => v.id === id)
+    if (!cur) return
+    // Referenced entries: strip the reference from the YAML so list/YAML stay in sync.
+    const rewrite = !!cur.name && referencedSet.has(cur.name)
+    const newYaml = rewrite ? removeComposeVar(composeYaml, cur.name) : composeYaml
+    const refNames = extractComposeVars(newYaml)
+    setEnvVars(prev => reconcile(prev.filter(v => v.id !== id), refNames))
+    if (rewrite) setComposeYaml(newYaml)
   }
 
   function handleEnvDownload() {
-    const defined = envRowsToMap(envRows)
-    const referenced = extractComposeVars(composeYaml)
-    // Union of referenced and defined keys (maintain consistent ordering)
-    const all = [...new Set([...referenced, ...Object.keys(defined)])].sort()
-    downloadText('.env', toDotEnv(all, defined))
+    const names = [...new Set([
+      ...envVars.map(v => v.name.trim()).filter(Boolean),
+      ...referencedVars,
+    ])].sort()
+    downloadText('.env', toDotEnv(names, {}))
   }
-
-  // ── Referenced-but-undefined vars ─────────────────────────────────────────
-
-  const referencedVars = extractComposeVars(composeYaml)
-  const definedKeys = new Set(envRows.map(r => r.key.trim()).filter(Boolean))
-  const undefinedVars = referencedVars.filter(v => !definedKeys.has(v))
 
   // ── Save ──────────────────────────────────────────────────────────────────
 
@@ -201,7 +274,10 @@ export function StackEditorPage() {
     setSaving(true)
     setError(null)
     try {
-      const envVars = envRowsToMap(envRows)
+      const envVarNames = [...new Set([
+        ...envVars.map(v => v.name.trim()).filter(Boolean),
+        ...referencedVars,
+      ])].sort()
 
       if (isEdit) {
         // UpdateStack → creates a new immutable version
@@ -212,7 +288,7 @@ export function StackEditorPage() {
             id,
             description,
             composeYaml,
-            envVars,
+            envVarNames,
           }),
         })
         if (!res.ok) {
@@ -229,7 +305,7 @@ export function StackEditorPage() {
             name: name.trim(),
             description,
             composeYaml,
-            envVars,
+            envVarNames,
           }),
         })
         if (!res.ok) {
@@ -343,72 +419,69 @@ export function StackEditorPage() {
             </button>
           </div>
 
-          {/* Defined env var rows */}
+          <p className="text-xs shrink-0" style={{ color: 'var(--text-muted)' }}>
+            Declare the variables this stack needs. Values are filled in per server when you deploy.
+          </p>
+
+          {/* Variable name rows (names only — values set at deploy time) */}
           <div className="space-y-1.5">
-            {envRows.map((row, idx) => (
-              <div key={idx} className="flex items-center gap-1.5">
-                <input
-                  value={row.key}
-                  onChange={e => patchEnvRow(idx, { key: e.target.value })}
-                  placeholder="KEY"
-                  className="flex-1 min-w-0 px-2 py-1 rounded border text-xs font-mono outline-none focus:border-[var(--accent)]"
-                  style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
-                />
-                <input
-                  value={row.value}
-                  onChange={e => patchEnvRow(idx, { value: e.target.value })}
-                  placeholder="value"
-                  className="flex-1 min-w-0 px-2 py-1 rounded border text-xs font-mono outline-none focus:border-[var(--accent)]"
-                  style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
-                />
-                <button
-                  onClick={() => removeEnvRow(idx)}
-                  className="shrink-0 p-1 rounded hover:bg-[var(--surface-2)]"
-                  style={{ color: 'var(--text-muted)' }}
-                  title="Remove"
-                >
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            ))}
+            {displayVars.map((v) => {
+              const isReferenced = v.name.trim() !== '' && referencedSet.has(v.name)
+              const hasDefault = isReferenced && v.name in referencedDefaults
+              return (
+                <div key={v.id} className="flex items-center gap-1.5">
+                  <input
+                    value={v.name}
+                    onChange={e => renameVar(v.id, e.target.value)}
+                    placeholder="VAR_NAME"
+                    className="flex-1 min-w-0 px-2 py-1 rounded border text-xs font-mono outline-none focus:border-[var(--accent)]"
+                    style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
+                  />
+                  {isReferenced && (
+                    <span
+                      className="shrink-0 text-[10px] px-1 py-0.5 rounded"
+                      style={{ backgroundColor: 'var(--surface-2)', color: 'var(--text-muted)' }}
+                      title="Referenced by ${...} in compose.yaml"
+                    >
+                      referenced
+                    </span>
+                  )}
+                  {hasDefault && (
+                    <span
+                      className="shrink-0 text-[10px] font-mono px-1 py-0.5 rounded truncate max-w-24"
+                      style={{ backgroundColor: 'var(--bg)', color: 'var(--text-muted)' }}
+                      title={`Default from compose: ${referencedDefaults[v.name] || '(empty)'}`}
+                    >
+                      default: {referencedDefaults[v.name] || '(empty)'}
+                    </span>
+                  )}
+                  {!isReferenced && (
+                    <button
+                      onClick={() => removeVar(v.id)}
+                      className="shrink-0 p-1 rounded hover:bg-[var(--surface-2)]"
+                      style={{ color: 'var(--text-muted)' }}
+                      title="Remove"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
+                </div>
+              )
+            })}
           </div>
 
           <button
-            onClick={addEnvRow}
+            onClick={addVar}
             className="flex items-center gap-1 text-xs px-2 py-1 rounded border w-fit transition-colors hover:bg-[var(--surface-2)]"
             style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
           >
             <Plus size={12} /> Add variable
           </button>
 
-          {/* Referenced-but-undefined vars */}
-          {undefinedVars.length > 0 && (
-            <div className="mt-2 rounded border p-3" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}>
-              <p className="text-xs font-medium mb-2" style={{ color: 'var(--text-muted)' }}>
-                Referenced in compose (not defined here):
-              </p>
-              <div className="space-y-1">
-                {undefinedVars.map(v => (
-                  <div key={v} className="flex items-center gap-2">
-                    <code className="text-xs font-mono" style={{ color: 'var(--accent)' }}>{v}</code>
-                    <button
-                      onClick={() => setEnvRows(r => [...r, { key: v, value: '' }])}
-                      className="text-xs px-1.5 py-0.5 rounded border transition-colors hover:bg-[var(--surface-2)]"
-                      style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
-                      title="Add to env vars"
-                    >
-                      + add
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* When no vars defined and no refs */}
-          {envRows.length === 0 && referencedVars.length === 0 && (
+          {envVars.length === 0 && (
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              No variables defined. Add env vars above, or use <code>{'${VAR}'}</code> in your compose.yaml to reference them.
+              No variables yet. Add one above, or use <code>{'${VAR}'}</code> in your compose.yaml to reference them.
             </p>
           )}
         </div>
@@ -450,7 +523,7 @@ export function StackEditorPage() {
           <div className="flex-1 min-h-0 rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
             <CodeMirror
               value={composeYaml}
-              onChange={setComposeYaml}
+              onChange={setYaml}
               extensions={cmExtensions}
               theme={oneDark}
               height="100%"
