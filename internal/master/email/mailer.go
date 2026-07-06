@@ -108,7 +108,10 @@ func (m *Mailer) send(ctx context.Context, to, subject, body string) {
 			slog.Error("smtp: send", "to", to, "err", err)
 		}
 	} else {
-		auth := smtp.PlainAuth("", cfg.Username, password, cfg.Host)
+		var auth smtp.Auth
+		if cfg.Username != "" {
+			auth = smtp.PlainAuth("", cfg.Username, password, cfg.Host)
+		}
 		if err := smtp.SendMail(addr, auth, from, []string{to}, msg); err != nil {
 			slog.Error("smtp: send", "to", to, "err", err)
 		}
