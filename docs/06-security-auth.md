@@ -116,11 +116,23 @@ OIDC login flow:
 1. Browser clicks "Login with SSO" → Master redirects to OIDC provider.
 2. Provider authenticates user, redirects back with `code`.
 3. Master exchanges `code` for tokens, verifies ID token.
-4. Master creates (or updates) local user record from claims (`sub`, `email`, `name`).
+4. Master matches the identity to a **pre-existing** local user — first by `oidc_subject`,
+   then by email (`username`), linking the `sub` on first login. There is **no** just-in-time
+   provisioning: an unknown identity is redirected to `/login?error=oidc_no_account`. The user
+   must be created in orkestra beforehand.
 5. Maps groups/claims to roles per `claim_mapping`.
 6. Creates session → sets cookie.
 
-Both auth methods can coexist. Users can have both a local password and an OIDC subject.
+Both auth methods can coexist by default: a user can have both a local password and an OIDC
+subject.
+
+**SSO-only users.** A user can be flagged `sso_only` (at creation or via the user editor). Such a
+user authenticates exclusively via OIDC: no invite email is sent, and every path that would set or
+use a local password — `Login`, the invite/reset `set-password` flow, admin `ResetPassword`,
+`SendPasswordLink`, and self-service `RequestPasswordReset` — is rejected server-side. Toggling
+the flag off is lossless: any existing `password_hash` is left dormant (never cleared), so local
+login is restored immediately. Note: there is no guard against flagging the last remaining admin
+as `sso_only`; if the IdP is unavailable there would then be no local admin fallback.
 
 ### CSRF Protection
 

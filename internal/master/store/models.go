@@ -235,4 +235,5 @@ type User struct {
 	Disabled     bool    `json:"disabled"`
 	CreatedAt    int64   `json:"created_at"`
 	LastLoginAt  *int64  `json:"last_login_at"`
+	SsoOnly      bool    `json:"sso_only"`
 }

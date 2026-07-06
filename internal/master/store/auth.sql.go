@@ -101,7 +101,7 @@ func (q *Queries) GetSession(ctx context.Context, arg GetSessionParams) (Session
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, username, display_name, password_hash, oidc_subject, disabled, created_at, last_login_at FROM users WHERE id = $1
+SELECT id, username, display_name, password_hash, oidc_subject, disabled, created_at, last_login_at, sso_only FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUser(ctx context.Context, id string) (User, error) {
@@ -116,12 +116,13 @@ func (q *Queries) GetUser(ctx context.Context, id string) (User, error) {
 		&i.Disabled,
 		&i.CreatedAt,
 		&i.LastLoginAt,
+		&i.SsoOnly,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, display_name, password_hash, oidc_subject, disabled, created_at, last_login_at FROM users WHERE username = $1
+SELECT id, username, display_name, password_hash, oidc_subject, disabled, created_at, last_login_at, sso_only FROM users WHERE username = $1
 `
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
@@ -136,6 +137,7 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.Disabled,
 		&i.CreatedAt,
 		&i.LastLoginAt,
+		&i.SsoOnly,
 	)
 	return i, err
 }
@@ -272,9 +274,9 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 }
 
 const insertUser = `-- name: InsertUser :one
-INSERT INTO users (id, username, display_name, password_hash, disabled, created_at)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, username, display_name, password_hash, oidc_subject, disabled, created_at, last_login_at
+INSERT INTO users (id, username, display_name, password_hash, disabled, created_at, sso_only)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, username, display_name, password_hash, oidc_subject, disabled, created_at, last_login_at, sso_only
 `
 
 type InsertUserParams struct {
@@ -284,6 +286,7 @@ type InsertUserParams struct {
 	PasswordHash *string `json:"password_hash"`
 	Disabled     bool    `json:"disabled"`
 	CreatedAt    int64   `json:"created_at"`
+	SsoOnly      bool    `json:"sso_only"`
 }
 
 func (q *Queries) InsertUser(ctx context.Context, arg InsertUserParams) (User, error) {
@@ -294,6 +297,7 @@ func (q *Queries) InsertUser(ctx context.Context, arg InsertUserParams) (User, e
 		arg.PasswordHash,
 		arg.Disabled,
 		arg.CreatedAt,
+		arg.SsoOnly,
 	)
 	var i User
 	err := row.Scan(
@@ -305,6 +309,7 @@ func (q *Queries) InsertUser(ctx context.Context, arg InsertUserParams) (User, e
 		&i.Disabled,
 		&i.CreatedAt,
 		&i.LastLoginAt,
+		&i.SsoOnly,
 	)
 	return i, err
 }
@@ -372,7 +377,7 @@ func (q *Queries) ListRoleBindingsByUser(ctx context.Context, userID string) ([]
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, username, display_name, password_hash, oidc_subject, disabled, created_at, last_login_at FROM users ORDER BY username
+SELECT id, username, display_name, password_hash, oidc_subject, disabled, created_at, last_login_at, sso_only FROM users ORDER BY username
 `
 
 func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
@@ -393,6 +398,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 			&i.Disabled,
 			&i.CreatedAt,
 			&i.LastLoginAt,
+			&i.SsoOnly,
 		); err != nil {
 			return nil, err
 		}
@@ -451,7 +457,7 @@ func (q *Queries) SetPasswordHash(ctx context.Context, arg SetPasswordHashParams
 }
 
 const setUsername = `-- name: SetUsername :one
-UPDATE users SET username = $2 WHERE id = $1 RETURNING id, username, display_name, password_hash, oidc_subject, disabled, created_at, last_login_at
+UPDATE users SET username = $2 WHERE id = $1 RETURNING id, username, display_name, password_hash, oidc_subject, disabled, created_at, last_login_at, sso_only
 `
 
 type SetUsernameParams struct {
@@ -471,6 +477,7 @@ func (q *Queries) SetUsername(ctx context.Context, arg SetUsernameParams) (User,
 		&i.Disabled,
 		&i.CreatedAt,
 		&i.LastLoginAt,
+		&i.SsoOnly,
 	)
 	return i, err
 }
@@ -490,7 +497,7 @@ func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) erro
 }
 
 const updateDisplayName = `-- name: UpdateDisplayName :one
-UPDATE users SET display_name = $2 WHERE id = $1 RETURNING id, username, display_name, password_hash, oidc_subject, disabled, created_at, last_login_at
+UPDATE users SET display_name = $2 WHERE id = $1 RETURNING id, username, display_name, password_hash, oidc_subject, disabled, created_at, last_login_at, sso_only
 `
 
 type UpdateDisplayNameParams struct {
@@ -510,12 +517,13 @@ func (q *Queries) UpdateDisplayName(ctx context.Context, arg UpdateDisplayNamePa
 		&i.Disabled,
 		&i.CreatedAt,
 		&i.LastLoginAt,
+		&i.SsoOnly,
 	)
 	return i, err
 }
 
 const updateUser = `-- name: UpdateUser :one
-UPDATE users SET username = $2, display_name = $3, disabled = $4 WHERE id = $1 RETURNING id, username, display_name, password_hash, oidc_subject, disabled, created_at, last_login_at
+UPDATE users SET username = $2, display_name = $3, disabled = $4, sso_only = $5 WHERE id = $1 RETURNING id, username, display_name, password_hash, oidc_subject, disabled, created_at, last_login_at, sso_only
 `
 
 type UpdateUserParams struct {
@@ -523,6 +531,7 @@ type UpdateUserParams struct {
 	Username    string  `json:"username"`
 	DisplayName *string `json:"display_name"`
 	Disabled    bool    `json:"disabled"`
+	SsoOnly     bool    `json:"sso_only"`
 }
 
 func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error) {
@@ -531,6 +540,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		arg.Username,
 		arg.DisplayName,
 		arg.Disabled,
+		arg.SsoOnly,
 	)
 	var i User
 	err := row.Scan(
@@ -542,6 +552,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.Disabled,
 		&i.CreatedAt,
 		&i.LastLoginAt,
+		&i.SsoOnly,
 	)
 	return i, err
 }

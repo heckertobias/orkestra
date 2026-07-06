@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, RefreshCw, Pencil, X, ChevronDown, ChevronRight, Check, Info, KeyRound } from 'lucide-react'
+import { Plus, RefreshCw, Pencil, X, ChevronDown, ChevronRight, Check, Info, KeyRound, Mail } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { useAuth, isAdmin } from '@/lib/auth'
 
@@ -20,6 +20,7 @@ interface User {
   roles: string[]
   hasPassword: boolean
   hasOidc: boolean
+  ssoOnly: boolean
   createdAt: number
   lastLoginAt: number
   bindings: UserBinding[]
@@ -163,7 +164,7 @@ export function UsersPage() {
   const [error, setError]     = useState<string | null>(null)
   const [showCreate, setShowCreate]   = useState(false)
   const [editPerms, setEditPerms]     = useState<User | null>(null)
-  const [form, setForm] = useState({ username: '', displayName: '', password: '' })
+  const [form, setForm] = useState({ username: '', displayName: '', password: '', ssoOnly: false })
   const [busy, setBusy]           = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
@@ -194,6 +195,7 @@ export function UsersPage() {
           roles:       Array.isArray(u.roles) ? u.roles.map(String) : [],
           hasPassword: Boolean(u.hasPassword ?? u.has_password ?? false),
           hasOidc:     Boolean(u.hasOidc ?? u.has_oidc ?? false),
+          ssoOnly:     Boolean(u.ssoOnly ?? u.sso_only ?? false),
           createdAt:   Number(u.createdAt ?? u.created_at ?? 0),
           lastLoginAt: Number(u.lastLoginAt ?? u.last_login_at ?? 0),
           bindings:    Array.isArray(u.bindings) ? u.bindings.map((b: Record<string, unknown>) => ({
@@ -240,11 +242,11 @@ export function UsersPage() {
       const res = await fetch('/orkestra.v1.AuthService/CreateUser', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: form.username, displayName: form.displayName }),
+        body: JSON.stringify({ username: form.username, displayName: form.displayName, ssoOnly: form.ssoOnly }),
       })
       if (!res.ok) throw new Error(apiError(await res.text()))
       setShowCreate(false)
-      setForm({ username: '', displayName: '', password: '' })
+      setForm({ username: '', displayName: '', password: '', ssoOnly: false })
       load()
     } catch (e) {
       setFormError(errText(e))
@@ -301,7 +303,12 @@ export function UsersPage() {
                 style={{ borderBottom: '1px solid var(--border)' }}
                 onDoubleClick={() => admin && setEditPerms(u)}
               >
-                <td className="px-4 py-3 font-medium" style={{ color: 'var(--text)' }}>{u.username}</td>
+                <td className="px-4 py-3 font-medium" style={{ color: 'var(--text)' }}>
+                  <span className="inline-flex items-center gap-2">
+                    {u.username}
+                    {u.ssoOnly && <Badge variant="default">SSO-only</Badge>}
+                  </span>
+                </td>
                 <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>{u.displayName || '—'}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1">
@@ -355,7 +362,17 @@ export function UsersPage() {
                 className={inputCls} style={inputStyle} placeholder="Jane Smith"
               />
             </Field>
-            <InfoBar>An invite email will be sent so the user can set their own password.</InfoBar>
+            <SwitchRow
+              checked={form.ssoOnly}
+              onChange={v => setForm(f => ({ ...f, ssoOnly: v }))}
+              label="SSO-only"
+              description="User signs in via SSO only — no invite email and no local password"
+            />
+            <InfoBar>
+              {form.ssoOnly
+                ? 'No invite email will be sent. The user must sign in via SSO (their account must exist in the identity provider).'
+                : 'An invite email will be sent so the user can set their own password.'}
+            </InfoBar>
           </div>
           <div className="flex justify-end gap-2 mt-4">
             <button
@@ -413,6 +430,7 @@ function PermissionsMatrix({
     buildMatrix(user.bindings, servers, stacks)
   )
   const [disabled, setDisabled]         = useState(user.disabled)
+  const [ssoOnly, setSsoOnly]           = useState(user.ssoOnly)
   const [email, setEmail]               = useState(user.username)
   const [displayName, setDisplayName]   = useState(user.displayName)
   const [busy, setBusy]                 = useState(false)
@@ -421,6 +439,7 @@ function PermissionsMatrix({
   const [showResetPw, setShowResetPw]   = useState(false)
   const [newPw, setNewPw]               = useState('')
   const [resetPwError, setResetPwError] = useState<string | null>(null)
+  const [linkSent, setLinkSent]         = useState(false)
 
   // An admin viewing their own permissions cannot turn Admin off.
   const adminLocked = isSelf && matrix.admin
@@ -445,23 +464,43 @@ function PermissionsMatrix({
     }
   }
 
+  async function sendPasswordLink() {
+    setBusy(true)
+    setError(null)
+    setLinkSent(false)
+    try {
+      const res = await fetch('/orkestra.v1.AuthService/SendPasswordLink', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id }),
+      })
+      if (!res.ok) throw new Error(apiError(await res.text()))
+      setLinkSent(true)
+    } catch (e) {
+      setError(errText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function save() {
     setBusy(true)
     setError(null)
     try {
       const promises: Promise<void>[] = []
 
-      // Update email, display name, or disabled state if any changed.
+      // Update email, display name, disabled, or sso_only state if any changed.
       const emailChanged       = email !== user.username
       const displayNameChanged = displayName !== user.displayName
       const disabledChanged    = disabled !== user.disabled
+      const ssoOnlyChanged     = ssoOnly !== user.ssoOnly
 
-      if (emailChanged || displayNameChanged || disabledChanged) {
+      if (emailChanged || displayNameChanged || disabledChanged || ssoOnlyChanged) {
         promises.push(
           fetch('/orkestra.v1.AuthService/UpdateUser', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: user.id, username: email, displayName, disabled }),
+            body: JSON.stringify({ id: user.id, username: email, displayName, disabled, ssoOnly }),
           }).then(async r => {
             if (!r.ok) throw new Error(apiError(await r.text()))
           })
@@ -628,6 +667,15 @@ function PermissionsMatrix({
                   You can't deactivate your own account.
                 </InfoBar>
               )}
+              <div className="mt-4">
+                <SwitchRow
+                  checked={ssoOnly}
+                  onChange={setSsoOnly}
+                  disabled={isSelf}
+                  label="SSO-only"
+                  description="Only OIDC login is allowed — local password is disabled (kept dormant, restored if turned off)"
+                />
+              </div>
             </div>
 
             {/* Admin switch */}
@@ -718,14 +766,27 @@ function PermissionsMatrix({
                   Delete user
                 </button>
               )}
-              <button
-                onClick={() => { setShowResetPw(true); setResetPwError(null); setNewPw('') }}
-                className="flex items-center gap-1.5 text-sm"
-                style={{ color: 'var(--text-muted)' }}
-                title="Admin reset password"
-              >
-                <KeyRound size={13} /> Reset password
-              </button>
+              {!user.ssoOnly && (
+                <button
+                  onClick={() => { setShowResetPw(true); setResetPwError(null); setNewPw('') }}
+                  className="flex items-center gap-1.5 text-sm"
+                  style={{ color: 'var(--text-muted)' }}
+                  title="Admin reset password"
+                >
+                  <KeyRound size={13} /> Reset password
+                </button>
+              )}
+              {!user.ssoOnly && (
+                <button
+                  onClick={sendPasswordLink}
+                  disabled={busy}
+                  className="flex items-center gap-1.5 text-sm disabled:opacity-50"
+                  style={{ color: 'var(--text-muted)' }}
+                  title="Email the user a set-password link"
+                >
+                  <Mail size={13} /> {linkSent ? 'Link sent ✓' : 'Send password link'}
+                </button>
+              )}
             </div>
 
             <div className="flex gap-2">

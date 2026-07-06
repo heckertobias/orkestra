@@ -16,6 +16,7 @@ service AuthService {
   rpc UpdateUser(UpdateUserRequest)       returns (User);
   rpc DeleteUser(DeleteUserRequest)       returns (AuthEmpty);
   rpc ResetPassword(ResetPasswordRequest) returns (AuthEmpty);
+  rpc SendPasswordLink(SendPasswordLinkRequest) returns (AuthEmpty);
 
   // Self-service profile management (authenticated user)
   rpc UpdateProfile(UpdateProfileRequest)                       returns (User);
@@ -66,6 +67,7 @@ message User {
   int64  last_login_at = 8;
   repeated string roles    = 9;  // effective global role names (for display only)
   repeated RoleBinding bindings = 10; // full binding list for client-side RBAC gating
+  bool   sso_only      = 11; // when true, only OIDC login is allowed (no local password)
 }
 
 message LoginRequest {
@@ -86,6 +88,7 @@ message DeleteUserRequest { string id = 1; }
 message CreateUserRequest {
   string username     = 1; // must be a valid email address
   string display_name = 2;
+  bool   sso_only     = 3; // when true, no invite email is sent — user logs in via SSO only
   // password field removed — users set their own password via invite link
 }
 
@@ -94,7 +97,10 @@ message UpdateUserRequest {
   string display_name = 2;
   bool   disabled     = 3;
   string username     = 4; // new email address (admin path; must be a valid email)
+  bool   sso_only     = 5; // toggle OIDC-only auth for this user
 }
+
+message SendPasswordLinkRequest { string user_id = 1; }
 
 message UpdateProfileRequest {
   string display_name = 1;

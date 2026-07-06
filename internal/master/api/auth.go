@@ -192,6 +192,9 @@ func (h *AuthServiceHandler) Login(ctx context.Context, req *connect.Request[ork
 	if user.Disabled {
 		return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("account disabled"))
 	}
+	if user.SsoOnly {
+		return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("this account must sign in via SSO"))
+	}
 	if user.PasswordHash == nil || !masterauth.VerifyPassword(*user.PasswordHash, r.Password) {
 		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid credentials"))
 	}
@@ -304,6 +307,7 @@ func (h *AuthServiceHandler) CreateUser(ctx context.Context, req *connect.Reques
 		// PasswordHash is nil — user must set password via invite link
 		Disabled:  false,
 		CreatedAt: time.Now().UnixMilli(),
+		SsoOnly:   r.SsoOnly,
 	})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("create user: %w", err))
@@ -311,19 +315,22 @@ func (h *AuthServiceHandler) CreateUser(ctx context.Context, req *connect.Reques
 	actor := masterauth.UserFromContext(ctx)
 	h.auditAuth(ctx, nil, "user.create", ptrString(fmt.Sprintf("actor=%s target=%s", actor.Username, row.Username)))
 
-	// Generate and email an invite token.
-	rawToken, tokenHash := generateResetToken()
-	now := time.Now()
-	_ = h.q.InsertPasswordResetToken(ctx, store.InsertPasswordResetTokenParams{
-		ID:        uuid.NewString(),
-		UserID:    row.ID,
-		TokenHash: tokenHash,
-		Purpose:   "invite",
-		ExpiresAt: now.Add(72 * time.Hour).UnixMilli(),
-		CreatedAt: now.UnixMilli(),
-	})
-	link := h.publicURL(req.Header()) + "/set-password?token=" + rawToken
-	h.mailer.SendInvite(ctx, r.Username, link)
+	// SSO-only users authenticate exclusively via OIDC — no invite email / local password.
+	if !r.SsoOnly {
+		// Generate and email an invite token.
+		rawToken, tokenHash := generateResetToken()
+		now := time.Now()
+		_ = h.q.InsertPasswordResetToken(ctx, store.InsertPasswordResetTokenParams{
+			ID:        uuid.NewString(),
+			UserID:    row.ID,
+			TokenHash: tokenHash,
+			Purpose:   "invite",
+			ExpiresAt: now.Add(72 * time.Hour).UnixMilli(),
+			CreatedAt: now.UnixMilli(),
+		})
+		link := h.publicURL(req.Header()) + "/set-password?token=" + rawToken
+		h.mailer.SendInvite(ctx, r.Username, link)
+	}
 
 	return connect.NewResponse(userToProto(row, nil, nil)), nil
 }
@@ -371,6 +378,9 @@ func (h *AuthServiceHandler) UpdateUser(ctx context.Context, req *connect.Reques
 		Username:    newUsername,
 		DisplayName: ptrString(newDisplayName),
 		Disabled:    req.Msg.Disabled,
+		// Toggling sso_only only flips the flag; the password_hash is left intact
+		// (dormant) so switching back off restores local login without data loss.
+		SsoOnly: req.Msg.SsoOnly,
 	}
 
 	// Wrap with the admin-minimum guard only when actually disabling a currently
@@ -559,6 +569,9 @@ func (h *AuthServiceHandler) ResetPassword(ctx context.Context, req *connect.Req
 	if req.Msg.NewPassword == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("new_password required"))
 	}
+	if target, err := h.q.GetUser(ctx, req.Msg.UserId); err == nil && target.SsoOnly {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("local password disabled for SSO account"))
+	}
 	if err := h.validatePassword(ctx, req.Msg.NewPassword); err != nil {
 		return nil, err
 	}
@@ -572,6 +585,47 @@ func (h *AuthServiceHandler) ResetPassword(ctx context.Context, req *connect.Req
 	}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reset password: %w", err))
 	}
+	return connect.NewResponse(&orkestraV1.AuthEmpty{}), nil
+}
+
+// SendPasswordLink (admin) emails the target user a fresh set-password link — e.g. to
+// re-invite a user who lost the original one. It is rejected for SSO-only accounts and
+// requires SMTP to be enabled so the admin gets clear feedback instead of a silent no-op.
+func (h *AuthServiceHandler) SendPasswordLink(ctx context.Context, req *connect.Request[orkestraV1.SendPasswordLinkRequest]) (*connect.Response[orkestraV1.AuthEmpty], error) {
+	if err := requireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
+	user, err := h.q.GetUser(ctx, req.Msg.UserId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
+	}
+	if user.Disabled {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("account is disabled"))
+	}
+	if user.SsoOnly {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("local password disabled for SSO account"))
+	}
+	if cfg, err := h.q.GetSMTPConfig(ctx); err != nil || !cfg.Enabled {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("email sending is disabled — configure SMTP first"))
+	}
+
+	rawToken, tokenHash := generateResetToken()
+	now := time.Now()
+	if err := h.q.InsertPasswordResetToken(ctx, store.InsertPasswordResetTokenParams{
+		ID:        uuid.NewString(),
+		UserID:    user.ID,
+		TokenHash: tokenHash,
+		Purpose:   "invite",
+		ExpiresAt: now.Add(72 * time.Hour).UnixMilli(),
+		CreatedAt: now.UnixMilli(),
+	}); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("create invite token: %w", err))
+	}
+	link := h.publicURL(req.Header()) + "/set-password?token=" + rawToken
+	h.mailer.SendInvite(ctx, user.Username, link)
+
+	actor := masterauth.UserFromContext(ctx)
+	h.auditAuth(ctx, &user, "user.send_password_link", ptrString(fmt.Sprintf("actor=%s target=%s", actor.Username, user.Username)))
 	return connect.NewResponse(&orkestraV1.AuthEmpty{}), nil
 }
 
@@ -701,8 +755,8 @@ func (h *AuthServiceHandler) RequestPasswordReset(ctx context.Context, req *conn
 	}
 	go func() {
 		user, err := h.q.GetUserByUsername(context.Background(), em)
-		if err != nil || user.Disabled || user.PasswordHash == nil && user.OidcSubject != nil {
-			return // silently drop: unknown, disabled, or OIDC-only account
+		if err != nil || user.Disabled || user.SsoOnly || user.PasswordHash == nil && user.OidcSubject != nil {
+			return // silently drop: unknown, disabled, SSO-only, or OIDC-only account
 		}
 		rawToken, tokenHash := generateResetToken()
 		now := time.Now()
@@ -736,6 +790,9 @@ func (h *AuthServiceHandler) ResetPasswordWithToken(ctx context.Context, req *co
 	}
 	if time.Now().UnixMilli() > record.ExpiresAt {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("token expired"))
+	}
+	if target, err := h.q.GetUser(ctx, record.UserID); err == nil && target.SsoOnly {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("local password disabled for SSO account"))
 	}
 	if err := h.validatePassword(ctx, r.NewPassword); err != nil {
 		return nil, err
@@ -1088,6 +1145,7 @@ func userToProto(u store.User, roles []string, bindings []*orkestraV1.RoleBindin
 		LastLoginAt: lastLogin,
 		Roles:       roles,
 		Bindings:    bindings,
+		SsoOnly:     u.SsoOnly,
 	}
 }
 

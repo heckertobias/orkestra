@@ -11,12 +11,12 @@ SELECT * FROM users WHERE username = $1;
 SELECT * FROM users ORDER BY username;
 
 -- name: InsertUser :one
-INSERT INTO users (id, username, display_name, password_hash, disabled, created_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO users (id, username, display_name, password_hash, disabled, created_at, sso_only)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: UpdateUser :one
-UPDATE users SET username = $2, display_name = $3, disabled = $4 WHERE id = $1 RETURNING *;
+UPDATE users SET username = $2, display_name = $3, disabled = $4, sso_only = $5 WHERE id = $1 RETURNING *;
 
 -- name: UpdateDisplayName :one
 UPDATE users SET display_name = $2 WHERE id = $1 RETURNING *;
