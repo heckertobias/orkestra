@@ -43,11 +43,16 @@ type AuthServiceHandler struct {
 	kek        []byte
 	setupToken *string // non-nil when first-run setup is pending
 	mailer     *email.Mailer
+	// reloadOIDC re-initialises the live OIDC provider after the config changes.
+	// May be nil (e.g. in tests); UpdateOIDCConfig then only persists to the DB.
+	reloadOIDC func(context.Context) error
 }
 
-// NewAuthServiceHandler constructs an AuthServiceHandler.
-func NewAuthServiceHandler(db *pgxpool.Pool, kek []byte, setupToken *string, mailer *email.Mailer) *AuthServiceHandler {
-	return &AuthServiceHandler{db: db, q: store.New(db), kek: kek, setupToken: setupToken, mailer: mailer}
+// NewAuthServiceHandler constructs an AuthServiceHandler. reloadOIDC is invoked
+// after the OIDC config is persisted so the running provider picks up the change
+// without a Master restart; pass nil to skip live reloading.
+func NewAuthServiceHandler(db *pgxpool.Pool, kek []byte, setupToken *string, mailer *email.Mailer, reloadOIDC func(context.Context) error) *AuthServiceHandler {
+	return &AuthServiceHandler{db: db, q: store.New(db), kek: kek, setupToken: setupToken, mailer: mailer, reloadOIDC: reloadOIDC}
 }
 
 // AuditLogHTTPHandler returns audit log entries as JSON (GET /api/audit).
@@ -935,6 +940,13 @@ func (h *AuthServiceHandler) UpdateOIDCConfig(ctx context.Context, req *connect.
 	})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("save oidc config: %w", err))
+	}
+
+	// Re-initialise the live provider so SSO reflects the new config without a restart.
+	if h.reloadOIDC != nil {
+		if err := h.reloadOIDC(ctx); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload oidc provider: %w", err))
+		}
 	}
 
 	var respScopes []string

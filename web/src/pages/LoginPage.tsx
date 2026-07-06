@@ -5,11 +5,7 @@ import { useAuth } from '@/lib/auth'
 // Check at load time if OIDC is enabled — best-effort, silently ignored.
 async function checkOIDCEnabled(): Promise<boolean> {
   try {
-    const res = await fetch('/orkestra.v1.AuthService/GetOIDCConfig', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{}',
-    })
+    const res = await fetch('/auth/oidc/status')
     if (!res.ok) return false
     const d = await res.json()
     return Boolean(d.enabled)

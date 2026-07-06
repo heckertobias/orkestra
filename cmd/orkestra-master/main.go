@@ -175,7 +175,14 @@ func main() {
 	go rec.Run(ctx)
 
 	// --- OIDC Provider ---
-	oidcRedirectURL := fmt.Sprintf("http://%s/auth/oidc/callback", *uiAddr)
+	// The callback host must be browser-reachable: a 0.0.0.0 bind address is valid
+	// for listening but never as a redirect target (Safari rejects it outright), so
+	// normalise it to localhost.
+	oidcCallbackAddr := *uiAddr
+	if host, port, err := net.SplitHostPort(oidcCallbackAddr); err == nil && (host == "" || host == "0.0.0.0" || host == "::") {
+		oidcCallbackAddr = net.JoinHostPort("localhost", port)
+	}
+	oidcRedirectURL := fmt.Sprintf("http://%s/auth/oidc/callback", oidcCallbackAddr)
 	oidcProvider := masteroidc.New(q, kek)
 	if err := oidcProvider.Reload(ctx, oidcRedirectURL); err != nil {
 		slog.Warn("OIDC provider init failed (non-fatal)", "err", err)
@@ -200,7 +207,8 @@ func main() {
 	mailer := masteremail.New(q, kek)
 
 	// --- AuthService ---
-	authHandler := masterapi.NewAuthServiceHandler(db, kek, &setupToken, mailer)
+	reloadOIDC := func(ctx context.Context) error { return oidcProvider.Reload(ctx, oidcRedirectURL) }
+	authHandler := masterapi.NewAuthServiceHandler(db, kek, &setupToken, mailer, reloadOIDC)
 	authPath, authSvcHandler := orkestrav1connect.NewAuthServiceHandler(authHandler, connectOpts...)
 
 	// --- Session middleware ---
@@ -213,6 +221,7 @@ func main() {
 	uiMux.Handle(authPath, authSvcHandler)
 	uiMux.HandleFunc("/api/setup", masterauth.RateLimitMiddleware(authHandler.SetupHTTPHandler))
 	uiMux.HandleFunc("/api/audit", authHandler.AuditLogHTTPHandler)
+	uiMux.HandleFunc("/auth/oidc/status", oidcProvider.StatusHandler)
 	uiMux.HandleFunc("/auth/oidc/login", oidcProvider.LoginHandler)
 	uiMux.HandleFunc("/auth/oidc/callback", oidcProvider.CallbackHandler(q, 24*time.Hour))
 	uiMux.Handle("/", webui.Handler())

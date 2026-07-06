@@ -115,6 +115,14 @@ func (p *Provider) Enabled() bool {
 	return p.verifier != nil
 }
 
+// StatusHandler reports whether SSO is available (GET /auth/oidc/status).
+// It is intentionally public and returns only a boolean — the login page uses it
+// to decide whether to show the "Sign in with SSO" button before authentication.
+func (p *Provider) StatusHandler(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"enabled": p.Enabled()})
+}
+
 // LoginHandler starts the OIDC auth flow (GET /auth/oidc/login).
 func (p *Provider) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	p.mu.RLock()
