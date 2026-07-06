@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,6 +40,9 @@ type Provider struct {
 	claims      map[string]string // group value → role
 	groupsClaim string            // token claim that holds group membership (default: "groups")
 
+	endSessionEndpoint    string // provider's RP-initiated logout endpoint (from discovery)
+	postLogoutRedirectURL string // where the IdP returns the browser after logout
+
 	db  *store.Queries
 	kek []byte
 }
@@ -48,7 +53,8 @@ func New(db *store.Queries, kek []byte) *Provider {
 }
 
 // Reload reads the OIDC config from DB and (re)initialises the OIDC verifier.
-func (p *Provider) Reload(ctx context.Context, redirectURL string) error {
+// postLogoutRedirectURL is where the IdP returns the browser after RP-initiated logout.
+func (p *Provider) Reload(ctx context.Context, redirectURL, postLogoutRedirectURL string) error {
 	cfg, err := p.db.GetOIDCConfig(ctx)
 	if err != nil {
 		return nil // no config yet — that's fine
@@ -57,6 +63,7 @@ func (p *Provider) Reload(ctx context.Context, redirectURL string) error {
 		p.mu.Lock()
 		p.verifier = nil
 		p.oauth2 = nil
+		p.endSessionEndpoint = ""
 		p.mu.Unlock()
 		return nil
 	}
@@ -93,6 +100,12 @@ func (p *Provider) Reload(ctx context.Context, redirectURL string) error {
 		groupsClaim = "groups"
 	}
 
+	// Discover the RP-initiated logout endpoint (optional — not all IdPs advertise it).
+	var discovery struct {
+		EndSessionEndpoint string `json:"end_session_endpoint"`
+	}
+	_ = provider.Claims(&discovery)
+
 	p.mu.Lock()
 	p.verifier = provider.Verifier(&gooidc.Config{ClientID: cfg.ClientID})
 	p.oauth2 = &oauth2.Config{
@@ -104,8 +117,43 @@ func (p *Provider) Reload(ctx context.Context, redirectURL string) error {
 	}
 	p.claims = claimMapping
 	p.groupsClaim = groupsClaim
+	p.endSessionEndpoint = discovery.EndSessionEndpoint
+	p.postLogoutRedirectURL = postLogoutRedirectURL
 	p.mu.Unlock()
 	return nil
+}
+
+// LogoutURL builds the provider's RP-initiated logout URL for the given id_token hint,
+// or returns ("", false) when the IdP advertises no end_session_endpoint. On success the
+// IdP ends its session and redirects the browser to the configured post-logout URL.
+func (p *Provider) LogoutURL(idTokenHint string) (string, bool) {
+	p.mu.RLock()
+	endpoint := p.endSessionEndpoint
+	postLogout := p.postLogoutRedirectURL
+	clientID := ""
+	if p.oauth2 != nil {
+		clientID = p.oauth2.ClientID
+	}
+	p.mu.RUnlock()
+
+	if endpoint == "" {
+		return "", false
+	}
+	q := url.Values{}
+	if idTokenHint != "" {
+		q.Set("id_token_hint", idTokenHint)
+	}
+	if clientID != "" {
+		q.Set("client_id", clientID)
+	}
+	if postLogout != "" {
+		q.Set("post_logout_redirect_uri", postLogout)
+	}
+	sep := "?"
+	if strings.Contains(endpoint, "?") {
+		sep = "&"
+	}
+	return endpoint + sep + q.Encode(), true
 }
 
 // Enabled reports whether OIDC is configured and active.
@@ -249,11 +297,12 @@ func (p *Provider) CallbackHandler(q *store.Queries, sessionTTL time.Duration) h
 		now := time.Now()
 		expires := now.Add(sessionTTL)
 		if err := q.InsertSession(ctx, store.InsertSessionParams{
-			ID:        sessionID,
-			UserID:    user.ID,
-			CreatedAt: now.UnixMilli(),
-			ExpiresAt: expires.UnixMilli(),
-			LastSeen:  now.UnixMilli(),
+			ID:          sessionID,
+			UserID:      user.ID,
+			CreatedAt:   now.UnixMilli(),
+			ExpiresAt:   expires.UnixMilli(),
+			LastSeen:    now.UnixMilli(),
+			OidcIDToken: &rawIDToken,
 		}); err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return

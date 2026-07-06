@@ -7,7 +7,7 @@ option go_package = "github.com/heckertobias/orkestra/internal/shared/gen/orkest
 service AuthService {
   // Session auth
   rpc Login(LoginRequest)                 returns (LoginResponse);
-  rpc Logout(AuthEmpty)                   returns (AuthEmpty);
+  rpc Logout(AuthEmpty)                   returns (LogoutResponse);
   rpc GetCurrentUser(AuthEmpty)           returns (User);
 
   // User management (admin)
@@ -79,6 +79,13 @@ message LoginResponse {
   User   user       = 1;
   // Session token is set as an httponly cookie by the server; not included here.
   string session_id = 2; // for API clients that can't use cookies
+}
+
+message LogoutResponse {
+  // When the session was SSO-authenticated, the provider's end_session_endpoint URL
+  // (with id_token_hint + post_logout_redirect_uri) so the client can offer a full
+  // RP-initiated logout. Empty for local (password) sessions.
+  string post_logout_url = 1;
 }
 
 message ListUsersRequest  { bool include_disabled = 1; }

@@ -34,11 +34,14 @@ UPDATE users SET password_hash = $2 WHERE id = $1;
 UPDATE users SET last_login_at = $2 WHERE id = $1;
 
 -- name: InsertSession :exec
-INSERT INTO sessions (id, user_id, created_at, expires_at, last_seen, ip_address, user_agent)
-VALUES ($1, $2, $3, $4, $5, $6, $7);
+INSERT INTO sessions (id, user_id, created_at, expires_at, last_seen, ip_address, user_agent, oidc_id_token)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 
 -- name: GetSession :one
 SELECT * FROM sessions WHERE id = $1 AND revoked = false AND expires_at > $2;
+
+-- name: GetSessionByID :one
+SELECT * FROM sessions WHERE id = $1;
 
 -- name: TouchSession :exec
 UPDATE sessions SET last_seen = $2 WHERE id = $1;
@@ -72,6 +75,20 @@ DELETE FROM role_bindings WHERE id = $1;
 SELECT COUNT(DISTINCT u.id) FROM users u
 JOIN role_bindings rb ON rb.user_id = u.id
 WHERE u.disabled = false
+  AND rb.role_id = 'role-admin'
+  AND rb.server_id IS NULL
+  AND rb.stack_id IS NULL
+  AND u.id <> $1;
+
+-- name: CountEnabledLocalAdminsExcludingUser :one
+-- Count enabled *local* global admins (can log in without the IdP), excluding the given
+-- user. A local admin is not sso_only and has a password set. Used to enforce that at
+-- least one local admin always remains when flagging a user sso_only.
+SELECT COUNT(DISTINCT u.id) FROM users u
+JOIN role_bindings rb ON rb.user_id = u.id
+WHERE u.disabled = false
+  AND u.sso_only = false
+  AND u.password_hash IS NOT NULL
   AND rb.role_id = 'role-admin'
   AND rb.server_id IS NULL
   AND rb.stack_id IS NULL

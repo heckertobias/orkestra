@@ -183,14 +183,15 @@ type Server struct {
 }
 
 type Session struct {
-	ID        string  `json:"id"`
-	UserID    string  `json:"user_id"`
-	CreatedAt int64   `json:"created_at"`
-	ExpiresAt int64   `json:"expires_at"`
-	LastSeen  int64   `json:"last_seen"`
-	IpAddress *string `json:"ip_address"`
-	UserAgent *string `json:"user_agent"`
-	Revoked   bool    `json:"revoked"`
+	ID          string  `json:"id"`
+	UserID      string  `json:"user_id"`
+	CreatedAt   int64   `json:"created_at"`
+	ExpiresAt   int64   `json:"expires_at"`
+	LastSeen    int64   `json:"last_seen"`
+	IpAddress   *string `json:"ip_address"`
+	UserAgent   *string `json:"user_agent"`
+	Revoked     bool    `json:"revoked"`
+	OidcIDToken *string `json:"oidc_id_token"`
 }
 
 type SmtpConfig struct {

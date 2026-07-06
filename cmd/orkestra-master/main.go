@@ -183,8 +183,9 @@ func main() {
 		oidcCallbackAddr = net.JoinHostPort("localhost", port)
 	}
 	oidcRedirectURL := fmt.Sprintf("http://%s/auth/oidc/callback", oidcCallbackAddr)
+	oidcPostLogoutURL := fmt.Sprintf("http://%s/login", oidcCallbackAddr)
 	oidcProvider := masteroidc.New(q, kek)
-	if err := oidcProvider.Reload(ctx, oidcRedirectURL); err != nil {
+	if err := oidcProvider.Reload(ctx, oidcRedirectURL, oidcPostLogoutURL); err != nil {
 		slog.Warn("OIDC provider init failed (non-fatal)", "err", err)
 	}
 
@@ -207,8 +208,8 @@ func main() {
 	mailer := masteremail.New(q, kek)
 
 	// --- AuthService ---
-	reloadOIDC := func(ctx context.Context) error { return oidcProvider.Reload(ctx, oidcRedirectURL) }
-	authHandler := masterapi.NewAuthServiceHandler(db, kek, &setupToken, mailer, reloadOIDC)
+	reloadOIDC := func(ctx context.Context) error { return oidcProvider.Reload(ctx, oidcRedirectURL, oidcPostLogoutURL) }
+	authHandler := masterapi.NewAuthServiceHandler(db, kek, &setupToken, mailer, reloadOIDC, oidcProvider.LogoutURL)
 	authPath, authSvcHandler := orkestrav1connect.NewAuthServiceHandler(authHandler, connectOpts...)
 
 	// --- Session middleware ---

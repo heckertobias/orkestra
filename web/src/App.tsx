@@ -9,6 +9,7 @@ import { StackDetailPage } from './pages/StackDetailPage'
 import { StackEditorPage } from './pages/StackEditorPage'
 import { SecretsPage } from './pages/SecretsPage'
 import { LoginPage } from './pages/LoginPage'
+import { LoggedOutPage } from './pages/LoggedOutPage'
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
 import { SetPasswordPage } from './pages/SetPasswordPage'
 import { VerifyEmailPage } from './pages/VerifyEmailPage'
@@ -39,6 +40,7 @@ export default function App() {
             <Routes>
               {/* Public routes — no auth required */}
               <Route path="login"            element={<LoginPage />} />
+              <Route path="logged-out"       element={<LoggedOutPage />} />
               <Route path="forgot-password"  element={<ForgotPasswordPage />} />
               <Route path="set-password"     element={<SetPasswordPage />} />
               <Route path="verify-email"     element={<VerifyEmailPage />} />

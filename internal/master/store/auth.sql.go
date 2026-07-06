@@ -28,6 +28,28 @@ func (q *Queries) CountEnabledGlobalAdminsExcludingUser(ctx context.Context, id 
 	return count, err
 }
 
+const countEnabledLocalAdminsExcludingUser = `-- name: CountEnabledLocalAdminsExcludingUser :one
+SELECT COUNT(DISTINCT u.id) FROM users u
+JOIN role_bindings rb ON rb.user_id = u.id
+WHERE u.disabled = false
+  AND u.sso_only = false
+  AND u.password_hash IS NOT NULL
+  AND rb.role_id = 'role-admin'
+  AND rb.server_id IS NULL
+  AND rb.stack_id IS NULL
+  AND u.id <> $1
+`
+
+// Count enabled *local* global admins (can log in without the IdP), excluding the given
+// user. A local admin is not sso_only and has a password set. Used to enforce that at
+// least one local admin always remains when flagging a user sso_only.
+func (q *Queries) CountEnabledLocalAdminsExcludingUser(ctx context.Context, id string) (int64, error) {
+	row := q.db.QueryRow(ctx, countEnabledLocalAdminsExcludingUser, id)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countUsers = `-- name: CountUsers :one
 SELECT COUNT(*) FROM users
 `
@@ -76,7 +98,7 @@ func (q *Queries) GetRoleBinding(ctx context.Context, id string) (RoleBinding, e
 }
 
 const getSession = `-- name: GetSession :one
-SELECT id, user_id, created_at, expires_at, last_seen, ip_address, user_agent, revoked FROM sessions WHERE id = $1 AND revoked = false AND expires_at > $2
+SELECT id, user_id, created_at, expires_at, last_seen, ip_address, user_agent, revoked, oidc_id_token FROM sessions WHERE id = $1 AND revoked = false AND expires_at > $2
 `
 
 type GetSessionParams struct {
@@ -96,6 +118,28 @@ func (q *Queries) GetSession(ctx context.Context, arg GetSessionParams) (Session
 		&i.IpAddress,
 		&i.UserAgent,
 		&i.Revoked,
+		&i.OidcIDToken,
+	)
+	return i, err
+}
+
+const getSessionByID = `-- name: GetSessionByID :one
+SELECT id, user_id, created_at, expires_at, last_seen, ip_address, user_agent, revoked, oidc_id_token FROM sessions WHERE id = $1
+`
+
+func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error) {
+	row := q.db.QueryRow(ctx, getSessionByID, id)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LastSeen,
+		&i.IpAddress,
+		&i.UserAgent,
+		&i.Revoked,
+		&i.OidcIDToken,
 	)
 	return i, err
 }
@@ -246,18 +290,19 @@ func (q *Queries) InsertRoleBinding(ctx context.Context, arg InsertRoleBindingPa
 }
 
 const insertSession = `-- name: InsertSession :exec
-INSERT INTO sessions (id, user_id, created_at, expires_at, last_seen, ip_address, user_agent)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO sessions (id, user_id, created_at, expires_at, last_seen, ip_address, user_agent, oidc_id_token)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type InsertSessionParams struct {
-	ID        string  `json:"id"`
-	UserID    string  `json:"user_id"`
-	CreatedAt int64   `json:"created_at"`
-	ExpiresAt int64   `json:"expires_at"`
-	LastSeen  int64   `json:"last_seen"`
-	IpAddress *string `json:"ip_address"`
-	UserAgent *string `json:"user_agent"`
+	ID          string  `json:"id"`
+	UserID      string  `json:"user_id"`
+	CreatedAt   int64   `json:"created_at"`
+	ExpiresAt   int64   `json:"expires_at"`
+	LastSeen    int64   `json:"last_seen"`
+	IpAddress   *string `json:"ip_address"`
+	UserAgent   *string `json:"user_agent"`
+	OidcIDToken *string `json:"oidc_id_token"`
 }
 
 func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) error {
@@ -269,6 +314,7 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 		arg.LastSeen,
 		arg.IpAddress,
 		arg.UserAgent,
+		arg.OidcIDToken,
 	)
 	return err
 }

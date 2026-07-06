@@ -46,13 +46,17 @@ type AuthServiceHandler struct {
 	// reloadOIDC re-initialises the live OIDC provider after the config changes.
 	// May be nil (e.g. in tests); UpdateOIDCConfig then only persists to the DB.
 	reloadOIDC func(context.Context) error
+	// oidcLogoutURL builds the provider's RP-initiated logout URL for an id_token hint,
+	// returning ("", false) when unavailable. May be nil (logout then stays local-only).
+	oidcLogoutURL func(idTokenHint string) (string, bool)
 }
 
 // NewAuthServiceHandler constructs an AuthServiceHandler. reloadOIDC is invoked
 // after the OIDC config is persisted so the running provider picks up the change
-// without a Master restart; pass nil to skip live reloading.
-func NewAuthServiceHandler(db *pgxpool.Pool, kek []byte, setupToken *string, mailer *email.Mailer, reloadOIDC func(context.Context) error) *AuthServiceHandler {
-	return &AuthServiceHandler{db: db, q: store.New(db), kek: kek, setupToken: setupToken, mailer: mailer, reloadOIDC: reloadOIDC}
+// without a Master restart; pass nil to skip live reloading. oidcLogoutURL builds the
+// RP-initiated logout URL used by Logout; pass nil to keep logout local-only.
+func NewAuthServiceHandler(db *pgxpool.Pool, kek []byte, setupToken *string, mailer *email.Mailer, reloadOIDC func(context.Context) error, oidcLogoutURL func(string) (string, bool)) *AuthServiceHandler {
+	return &AuthServiceHandler{db: db, q: store.New(db), kek: kek, setupToken: setupToken, mailer: mailer, reloadOIDC: reloadOIDC, oidcLogoutURL: oidcLogoutURL}
 }
 
 // AuditLogHTTPHandler returns audit log entries as JSON (GET /api/audit).
@@ -238,9 +242,18 @@ func (h *AuthServiceHandler) Login(ctx context.Context, req *connect.Request[ork
 }
 
 // Logout revokes the session cookie.
-func (h *AuthServiceHandler) Logout(ctx context.Context, _ *connect.Request[orkestraV1.AuthEmpty]) (*connect.Response[orkestraV1.AuthEmpty], error) {
+func (h *AuthServiceHandler) Logout(ctx context.Context, _ *connect.Request[orkestraV1.AuthEmpty]) (*connect.Response[orkestraV1.LogoutResponse], error) {
 	sessionID := masterauth.SessionIDFromContext(ctx)
+	var postLogoutURL string
 	if sessionID != "" {
+		// If this was an SSO session, offer an RP-initiated logout URL (built from the
+		// stored id_token) so the client can also end the IdP session. Read before revoke.
+		if sess, err := h.q.GetSessionByID(ctx, sessionID); err == nil &&
+			sess.OidcIDToken != nil && *sess.OidcIDToken != "" && h.oidcLogoutURL != nil {
+			if u, ok := h.oidcLogoutURL(*sess.OidcIDToken); ok {
+				postLogoutURL = u
+			}
+		}
 		_ = h.q.RevokeSession(ctx, sessionID)
 	}
 	u := masterauth.UserFromContext(ctx)
@@ -248,7 +261,7 @@ func (h *AuthServiceHandler) Logout(ctx context.Context, _ *connect.Request[orke
 		user, _ := h.q.GetUser(ctx, u.ID)
 		h.auditAuth(ctx, &user, "auth.logout", nil)
 	}
-	resp := connect.NewResponse(&orkestraV1.AuthEmpty{})
+	resp := connect.NewResponse(&orkestraV1.LogoutResponse{PostLogoutUrl: postLogoutURL})
 	masterauth.ClearSessionCookie(resp.Header())
 	return resp, nil
 }
@@ -397,8 +410,35 @@ func (h *AuthServiceHandler) UpdateUser(ctx context.Context, req *connect.Reques
 		return r, nil
 	}
 
+	// Flagging a currently-local admin as sso_only could remove the last local admin
+	// (one who can log in without the IdP). Detect that transition.
+	flaggingLocalAdmin := req.Msg.SsoOnly && !target.SsoOnly && !target.Disabled && target.PasswordHash != nil
+	if flaggingLocalAdmin {
+		targetRoles, _ := h.q.GetUserRoles(ctx, target.ID)
+		isAdmin := false
+		for _, r := range targetRoles {
+			if r == "admin" {
+				isAdmin = true
+				break
+			}
+		}
+		flaggingLocalAdmin = isAdmin
+	}
+
 	var row store.User
-	if req.Msg.Disabled && !target.Disabled {
+	switch {
+	case flaggingLocalAdmin:
+		// Removing the last local admin would leave no one able to log in without the
+		// IdP; enforce the invariant with an advisory-lock-protected transaction. This
+		// also covers a simultaneous disable (local admins ⊆ enabled admins).
+		if err := h.withLastLocalAdminGuard(ctx, req.Msg.Id, func(q *store.Queries) error {
+			var err error
+			row, err = doUpdate(q)
+			return err
+		}); err != nil {
+			return nil, err
+		}
+	case req.Msg.Disabled && !target.Disabled:
 		// Disabling an enabled account could remove the last enabled global admin;
 		// enforce the invariant with an advisory-lock-protected transaction.
 		if err := h.withLastAdminGuard(ctx, req.Msg.Id, func(q *store.Queries) error {
@@ -408,7 +448,7 @@ func (h *AuthServiceHandler) UpdateUser(ctx context.Context, req *connect.Reques
 		}); err != nil {
 			return nil, err
 		}
-	} else {
+	default:
 		var err error
 		row, err = doUpdate(h.q)
 		if err != nil {
@@ -1227,6 +1267,35 @@ func (h *AuthServiceHandler) withLastAdminGuard(ctx context.Context, userID stri
 	if remaining == 0 {
 		return connect.NewError(connect.CodeFailedPrecondition,
 			fmt.Errorf("cannot remove the last enabled admin: at least one admin must remain"))
+	}
+	if err := fn(q); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// withLastLocalAdminGuard is like withLastAdminGuard but enforces that at least one
+// *local* admin (enabled, global admin, not sso_only, with a password) remains after
+// the change — so nobody is locked out if the IdP becomes unavailable. It shares the
+// same advisory lock so it serializes against the other admin-mutating guards.
+func (h *AuthServiceHandler) withLastLocalAdminGuard(ctx context.Context, userID string, fn func(q *store.Queries) error) error {
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("begin tx: %w", err))
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", adminInvariantLockKey); err != nil {
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("acquire admin lock: %w", err))
+	}
+	q := h.q.WithTx(tx)
+	remaining, err := q.CountEnabledLocalAdminsExcludingUser(ctx, userID)
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("count local admins: %w", err))
+	}
+	if remaining == 0 {
+		return connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("cannot flag the last local admin as SSO-only: at least one local admin must remain"))
 	}
 	if err := fn(q); err != nil {
 		return err

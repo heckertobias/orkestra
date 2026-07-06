@@ -21,7 +21,8 @@ interface AuthCtx {
   user: AuthUser | null
   loading: boolean
   login: (username: string, password: string) => Promise<void>
-  logout: () => Promise<void>
+  // Returns the IdP RP-initiated logout URL for SSO sessions, or null for local ones.
+  logout: () => Promise<string | null>
   refresh: () => Promise<void>
 }
 
@@ -29,7 +30,7 @@ const Ctx = createContext<AuthCtx>({
   user: null,
   loading: true,
   login: async () => {},
-  logout: async () => {},
+  logout: async () => null,
   refresh: async () => {},
 })
 
@@ -86,13 +87,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await refresh()
   }, [refresh])
 
-  const logout = useCallback(async () => {
-    await fetch('/orkestra.v1.AuthService/Logout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    })
-    setUser(null)
+  const logout = useCallback(async (): Promise<string | null> => {
+    let postLogoutUrl: string | null = null
+    try {
+      const res = await fetch('/orkestra.v1.AuthService/Logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      if (res.ok) {
+        const d = await res.json().catch(() => ({}))
+        postLogoutUrl = d.postLogoutUrl || d.post_logout_url || null
+      }
+    } finally {
+      setUser(null)
+    }
+    return postLogoutUrl
   }, [])
 
   return <Ctx.Provider value={{ user, loading, login, logout, refresh }}>{children}</Ctx.Provider>

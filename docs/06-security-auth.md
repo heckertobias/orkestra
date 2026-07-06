@@ -131,8 +131,20 @@ user authenticates exclusively via OIDC: no invite email is sent, and every path
 use a local password — `Login`, the invite/reset `set-password` flow, admin `ResetPassword`,
 `SendPasswordLink`, and self-service `RequestPasswordReset` — is rejected server-side. Toggling
 the flag off is lossless: any existing `password_hash` is left dormant (never cleared), so local
-login is restored immediately. Note: there is no guard against flagging the last remaining admin
-as `sso_only`; if the IdP is unavailable there would then be no local admin fallback.
+login is restored immediately.
+
+**Local-admin invariant.** Flagging a user `sso_only` is blocked when it would remove the last
+*local* admin — an enabled global admin who is not `sso_only` and has a password set (i.e. can log
+in without the IdP). Enforced under the same advisory lock as the last-admin disable/revoke guards
+(`withLastLocalAdminGuard`), so at least one admin can always log in even if the IdP is down.
+
+**Logout.** `Logout` revokes the orkestra session and clears the cookie. For SSO sessions the
+Master also stores the `id_token` (`sessions.oidc_id_token`) and returns an RP-initiated logout URL
+(the IdP's `end_session_endpoint` with `id_token_hint` + `post_logout_redirect_uri`); the SPA then
+offers the user a choice to *also* end the IdP session. Without this, the IdP session persists and a
+subsequent SSO login re-authenticates silently (standard OIDC). Admins must register their
+post-logout redirect URIs at the IdP (e.g. Keycloak client attribute `post.logout.redirect.uris`),
+otherwise the IdP ends the session but will not redirect the browser back.
 
 ### CSRF Protection
 

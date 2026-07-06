@@ -12,6 +12,10 @@ type Querier interface {
 	// Count enabled users with a global admin role binding, excluding the given user.
 	// Used to enforce the invariant that at least one enabled global admin always remains.
 	CountEnabledGlobalAdminsExcludingUser(ctx context.Context, id string) (int64, error)
+	// Count enabled *local* global admins (can log in without the IdP), excluding the given
+	// user. A local admin is not sso_only and has a password set. Used to enforce that at
+	// least one local admin always remains when flagging a user sso_only.
+	CountEnabledLocalAdminsExcludingUser(ctx context.Context, id string) (int64, error)
 	CountSecretBindings(ctx context.Context, secretID string) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) error
@@ -32,6 +36,7 @@ type Querier interface {
 	GetSecret(ctx context.Context, id string) (Secret, error)
 	GetServer(ctx context.Context, id string) (Server, error)
 	GetSession(ctx context.Context, arg GetSessionParams) (Session, error)
+	GetSessionByID(ctx context.Context, id string) (Session, error)
 	GetStack(ctx context.Context, id string) (Stack, error)
 	GetStackVersion(ctx context.Context, id string) (StackVersion, error)
 	GetUser(ctx context.Context, id string) (User, error)

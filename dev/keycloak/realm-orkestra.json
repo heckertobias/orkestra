@@ -21,6 +21,9 @@
         "http://localhost:8080/auth/oidc/callback",
         "http://0.0.0.0:8080/auth/oidc/callback"
       ],
+      "attributes": {
+        "post.logout.redirect.uris": "http://localhost:8080/login##http://0.0.0.0:8080/login"
+      },
       "webOrigins": ["+"],
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,

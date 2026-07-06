@@ -4,14 +4,16 @@ import { cn } from '@/lib/cn'
 import { useAuth, isAdmin, canManageSecrets } from '@/lib/auth'
 
 export function Sidebar() {
-  const { user, logout } = useAuth()
+  const { user } = useAuth()
   const navigate = useNavigate()
   const admin = isAdmin(user)
   const secretsMgr = canManageSecrets(user)
 
-  async function handleLogout() {
-    await logout()
-    navigate('/login', { replace: true })
+  // Navigate to the public /logged-out page while still authenticated; that page performs
+  // the actual logout. Clearing `user` here (still on a guarded route) would let AuthGuard
+  // redirect to /login before we reach /logged-out.
+  function handleLogout() {
+    navigate('/logged-out', { replace: true })
   }
 
   return (
