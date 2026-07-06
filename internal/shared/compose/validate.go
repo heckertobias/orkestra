@@ -100,6 +100,14 @@ func ValidateCompose(composeYAML string) []Diagnostic {
 		if strings.HasPrefix(key.Value, "x-") {
 			continue
 		}
+		if key.Value == "name" {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityWarning,
+				Message:  `top-level "name" is managed by orkestra and is ignored — the stack name is used`,
+				Line:     key.Line,
+			})
+			continue
+		}
 		if _, unsup := unsupportedTopLevelKeys[key.Value]; unsup {
 			diags = append(diags, Diagnostic{
 				Severity: SeverityWarning,

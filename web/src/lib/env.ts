@@ -20,6 +20,24 @@ export function extractComposeVars(yaml: string): string[] {
 }
 
 /**
+ * Map each referenced variable to the 1-based line number(s) in the compose YAML
+ * where it appears (deduplicated, in document order). Mirrors extractComposeVars.
+ */
+export function extractComposeVarLines(yaml: string): Record<string, number[]> {
+  const out: Record<string, number[]> = {}
+  yaml.split('\n').forEach((text, i) => {
+    const ln = i + 1
+    const add = (name: string) => {
+      (out[name] ??= [])
+      if (!out[name].includes(ln)) out[name].push(ln)
+    }
+    for (const m of text.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)[^}]*\}/g)) add(m[1])
+    for (const m of text.matchAll(/(?<!\$)\$([A-Za-z_][A-Za-z0-9_]*)/g)) add(m[1])
+  })
+  return out
+}
+
+/**
  * Extract default values from compose variable references that provide one:
  * `${VAR:-default}` and `${VAR-default}`. The error forms (`${VAR:?err}` /
  * `${VAR?err}`) and plain `${VAR}` / `$VAR` are ignored. First occurrence wins.

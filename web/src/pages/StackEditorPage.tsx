@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Download, Plus, Trash2, Upload } from 'lucide-react'
+import { ArrowLeft, Download, Link2, Plus, Trash2, Upload } from 'lucide-react'
 import CodeMirror from '@uiw/react-codemirror'
 import { yaml } from '@codemirror/lang-yaml'
-import { oneDark } from '@codemirror/theme-one-dark'
+import { oneDarkTheme } from '@codemirror/theme-one-dark'
 import { linter, lintGutter, type Diagnostic } from '@codemirror/lint'
-import { keymap } from '@codemirror/view'
-import { Prec } from '@codemirror/state'
+import { keymap, EditorView, Decoration, ViewPlugin, MatchDecorator, tooltips, type DecorationSet, type ViewUpdate } from '@codemirror/view'
+import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
+import { tags as t } from '@lezer/highlight'
+import { Prec, RangeSetBuilder } from '@codemirror/state'
 import * as jsyaml from 'js-yaml'
 import { downloadText, readTextFile } from '@/lib/files'
-import { extractComposeVars, extractComposeVarDefaults, toDotEnv, renameComposeVar, removeComposeVar } from '@/lib/env'
+import { extractComposeVars, extractComposeVarDefaults, extractComposeVarLines, toDotEnv, renameComposeVar, removeComposeVar } from '@/lib/env'
 
 // ── CodeMirror linters ────────────────────────────────────────────────────────
 
@@ -101,7 +103,105 @@ const yamlAutoIndent = Prec.high(keymap.of([{
   },
 }]))
 
-const cmExtensions = [yamlAutoIndent, yaml(), yamlSyntaxLinter, composeSematicLinter, lintGutter()]
+// ── Syntax highlighting ───────────────────────────────────────────────────────
+
+// Custom highlight style (One-Dark family) — the YAML grammar tags every plain
+// scalar as `content`, so the bundled theme renders all values gray. Here values
+// get their own colors for faster scanning.
+const yamlHighlightStyle = HighlightStyle.define([
+  { tag: [t.propertyName, t.definition(t.propertyName)], color: '#61afef' }, // keys — blue
+  { tag: t.content,                                      color: '#d19a66' }, // plain values — orange
+  { tag: [t.string, t.special(t.string)],               color: '#98c379' }, // quoted / block — green
+  { tag: [t.keyword, t.bool, t.atom, t.null],           color: '#c678dd' }, // true/false/null, directives — violet
+  { tag: [t.labelName, t.typeName],                     color: '#e5c07b' }, // anchors, tags — yellow
+  { tag: t.meta,                                        color: '#c678dd' },
+  { tag: t.attributeValue,                              color: '#98c379' },
+  { tag: t.lineComment,          color: '#7f848e', fontStyle: 'italic' },
+  { tag: [t.separator, t.punctuation, t.squareBracket, t.brace], color: '#89929b' },
+])
+
+// Overlay: highlight ${VAR} / ${VAR:-default} interpolations in the accent color.
+const interpMatcher = new MatchDecorator({
+  regexp: /\$\{[^}]*\}/g,
+  decoration: Decoration.mark({ class: 'cm-yaml-interp' }),
+})
+const interpHighlighter = ViewPlugin.fromClass(class {
+  decorations: DecorationSet
+  constructor(view: EditorView) { this.decorations = interpMatcher.createDeco(view) }
+  update(u: ViewUpdate) { this.decorations = interpMatcher.updateDeco(u, this.decorations) }
+}, { decorations: v => v.decorations })
+const interpTheme = EditorView.theme({
+  '.cm-yaml-interp': { color: 'var(--accent)', fontWeight: '500' },
+})
+
+// ── Compose structure highlighting ─────────────────────────────────────────────
+
+// Indentation-driven emphasis of the *compose* structure (not just YAML syntax):
+// top-level blocks (services/networks/volumes/…) and the resource names directly
+// under them, so it's obvious at a glance where a new service begins.
+const RESOURCE_SECTIONS = new Set(['services', 'networks', 'volumes', 'configs', 'secrets'])
+const KEY_LINE = /^(\s*)([A-Za-z0-9_.-]+):(?=\s|$)/
+
+function buildStructureDecos(view: EditorView) {
+  const builder = new RangeSetBuilder<Decoration>()
+  const doc = view.state.doc
+  let currentSection = ''
+  let sectionChildIndent = -1
+  let seenResource = false
+  for (let i = 1; i <= doc.lines; i++) {
+    const line = doc.line(i)
+    const m = KEY_LINE.exec(line.text)
+    if (!m) continue
+    const indent = m[1].length
+    const keyFrom = line.from + indent
+    const keyTo = keyFrom + m[2].length
+    if (indent === 0) {
+      currentSection = m[2]
+      sectionChildIndent = -1
+      seenResource = false
+      builder.add(keyFrom, keyTo, Decoration.mark({ class: 'cm-compose-section' }))
+    } else if (RESOURCE_SECTIONS.has(currentSection)) {
+      if (sectionChildIndent === -1) sectionChildIndent = indent
+      if (indent === sectionChildIndent) {
+        if (seenResource) {
+          builder.add(line.from, line.from, Decoration.line({ class: 'cm-compose-block' }))
+        }
+        builder.add(keyFrom, keyTo, Decoration.mark({ class: 'cm-compose-resource' }))
+        seenResource = true
+      }
+    }
+  }
+  return builder.finish()
+}
+
+const composeStructure = ViewPlugin.fromClass(class {
+  decorations: DecorationSet
+  constructor(view: EditorView) { this.decorations = buildStructureDecos(view) }
+  update(u: ViewUpdate) { if (u.docChanged) this.decorations = buildStructureDecos(u.view) }
+}, { decorations: v => v.decorations })
+
+// Dual selector + !important so these beat the base `.ͼ…` highlight color, which
+// styles the inner token span nested inside our decoration mark.
+const structureTheme = EditorView.theme({
+  '.cm-compose-section, .cm-compose-section span':   { color: '#e5c07b !important', fontWeight: '700' }, // services/networks/volumes — gold, bold
+  '.cm-compose-resource, .cm-compose-resource span': { color: '#56b6c2 !important', fontWeight: '700' }, // resource names — cyan, bold
+  '.cm-compose-block':    { borderTop: '1px solid var(--border)', paddingTop: '1px' },
+})
+
+const cmExtensions = [
+  yamlAutoIndent,
+  yaml(),
+  syntaxHighlighting(yamlHighlightStyle),
+  composeStructure,
+  structureTheme,
+  interpHighlighter,
+  interpTheme,
+  yamlSyntaxLinter,
+  composeSematicLinter,
+  lintGutter(),
+  // render tooltips in <body> so they aren't clipped by the editor's overflow-hidden wrapper
+  tooltips({ parent: document.body }),
+]
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -200,6 +300,7 @@ export function StackEditorPage() {
   const referencedVars = useMemo(() => extractComposeVars(composeYaml), [composeYaml])
   const referencedSet = useMemo(() => new Set(referencedVars), [referencedVars])
   const referencedDefaults = useMemo(() => extractComposeVarDefaults(composeYaml), [composeYaml])
+  const referencedLines = useMemo(() => extractComposeVarLines(composeYaml), [composeYaml])
 
   // Display order: referenced entries first, then manual, alphabetical within each
   // group. Sorted view only — state order stays stable for reconcile().
@@ -424,46 +525,50 @@ export function StackEditorPage() {
           </p>
 
           {/* Variable name rows (names only — values set at deploy time) */}
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             {displayVars.map((v) => {
               const isReferenced = v.name.trim() !== '' && referencedSet.has(v.name)
               const hasDefault = isReferenced && v.name in referencedDefaults
               return (
-                <div key={v.id} className="flex items-center gap-1.5">
-                  <input
-                    value={v.name}
-                    onChange={e => renameVar(v.id, e.target.value)}
-                    placeholder="VAR_NAME"
-                    className="flex-1 min-w-0 px-2 py-1 rounded border text-xs font-mono outline-none focus:border-[var(--accent)]"
-                    style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
-                  />
-                  {isReferenced && (
-                    <span
-                      className="shrink-0 text-[10px] px-1 py-0.5 rounded"
-                      style={{ backgroundColor: 'var(--surface-2)', color: 'var(--text-muted)' }}
-                      title="Referenced by ${...} in compose.yaml"
-                    >
-                      referenced
-                    </span>
-                  )}
+                <div key={v.id}>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      value={v.name}
+                      onChange={e => renameVar(v.id, e.target.value)}
+                      placeholder="VAR_NAME"
+                      className="flex-1 min-w-0 px-2 py-1 rounded border text-xs font-mono outline-none focus:border-[var(--accent)]"
+                      style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--border)', color: 'var(--text)' }}
+                    />
+                    {/* fixed-width trailing slot keeps every input the same width */}
+                    <div className="w-5 shrink-0 flex justify-center">
+                      {isReferenced ? (
+                        <span
+                          className="p-1 flex items-center"
+                          style={{ color: 'var(--text-muted)' }}
+                          title={`Referenced via \${${v.name}} in compose.yaml — ${
+                            (referencedLines[v.name]?.length ?? 0) > 1 ? 'lines' : 'line'
+                          } ${(referencedLines[v.name] ?? []).join(', ')}`}
+                        >
+                          <Link2 size={12} />
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => removeVar(v.id)}
+                          className="p-1 rounded hover:bg-[var(--surface-2)]"
+                          style={{ color: 'var(--text-muted)' }}
+                          title="Remove"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
                   {hasDefault && (
-                    <span
-                      className="shrink-0 text-[10px] font-mono px-1 py-0.5 rounded truncate max-w-24"
-                      style={{ backgroundColor: 'var(--bg)', color: 'var(--text-muted)' }}
-                      title={`Default from compose: ${referencedDefaults[v.name] || '(empty)'}`}
-                    >
-                      default: {referencedDefaults[v.name] || '(empty)'}
-                    </span>
-                  )}
-                  {!isReferenced && (
-                    <button
-                      onClick={() => removeVar(v.id)}
-                      className="shrink-0 p-1 rounded hover:bg-[var(--surface-2)]"
-                      style={{ color: 'var(--text-muted)' }}
-                      title="Remove"
-                    >
-                      <Trash2 size={12} />
-                    </button>
+                    <div className="flex items-center gap-2 mt-1 pl-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                      <span className="font-mono truncate" title={`Default from compose: ${referencedDefaults[v.name] || '(empty)'}`}>
+                        default: {referencedDefaults[v.name] || '(empty)'}
+                      </span>
+                    </div>
                   )}
                 </div>
               )
@@ -525,7 +630,7 @@ export function StackEditorPage() {
               value={composeYaml}
               onChange={setYaml}
               extensions={cmExtensions}
-              theme={oneDark}
+              theme={oneDarkTheme}
               height="100%"
               minHeight="400px"
               placeholder={'services:\n  web:\n    image: nginx:alpine\n    ports:\n      - "80:80"'}
