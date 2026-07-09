@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -135,10 +136,25 @@ func main() {
 	agentPath, agentSvcHandler := orkestrav1connect.NewAgentServiceHandler(gwHandler,
 		connect.WithCompressMinBytes(1024),
 	)
-	agentMux.Handle(agentPath, agentgw.MTLSMiddleware(revocationChecker, agentSvcHandler))
+	// Rate-limit the unauthenticated Enroll bootstrap endpoint per client IP; every other
+	// AgentService RPC is gated by mTLS (see MTLSMiddleware) and left unlimited.
+	rateLimitedEnroll := masterauth.RateLimitMiddleware(agentSvcHandler.ServeHTTP)
+	agentGuarded := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == agentgw.EnrollProcedure {
+			rateLimitedEnroll(w, r)
+			return
+		}
+		agentSvcHandler.ServeHTTP(w, r)
+	})
+	agentMux.Handle(agentPath, agentgw.MTLSMiddleware(revocationChecker, agentGuarded))
 
-	caCert := ca.TLSCert()
-	agentTLSCfg := agentgw.NewAgentTLSConfig(caCert, ca.CertPool())
+	dnsNames, ips := agentTLSSANs(os.Getenv("ORKESTRA_AGENT_TLS_SANS"))
+	serverCert, err := ca.IssueServerCert(dnsNames, ips)
+	if err != nil {
+		slog.Error("issue agent server cert", "err", err)
+		os.Exit(1)
+	}
+	agentTLSCfg := agentgw.NewAgentTLSConfig(serverCert, ca.CertPool())
 
 	agentServer := &http.Server{
 		Addr:        *agentAddr,
@@ -296,4 +312,25 @@ func envOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// agentTLSSANs builds the SAN lists for the agent-listener server cert. localhost and the
+// loopback addresses are always included so a co-located agent (and the dev harness) can
+// verify the master; extra is a comma-separated list of additional hostnames/IPs (from
+// ORKESTRA_AGENT_TLS_SANS) for production deployments where agents dial a public name.
+func agentTLSSANs(extra string) (dnsNames []string, ips []net.IP) {
+	dnsNames = []string{"localhost"}
+	ips = []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback}
+	for _, s := range strings.Split(extra, ",") {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if ip := net.ParseIP(s); ip != nil {
+			ips = append(ips, ip)
+		} else {
+			dnsNames = append(dnsNames, s)
+		}
+	}
+	return dnsNames, ips
 }

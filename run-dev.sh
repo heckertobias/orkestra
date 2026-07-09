@@ -9,8 +9,11 @@
 #   --keycloak   Start a pre-configured Keycloak IdP for OIDC testing
 #   --mailpit    Start Mailpit SMTP catcher for email testing
 #   --all        Start all optional services
+#   --agent      Start one orkestra agent (isolated Docker-in-Docker daemon)
+#   --agents N   Start N agents, each with its own isolated DinD daemon
 #
-# These can also be enabled via env vars: ORKESTRA_DEV_KEYCLOAK=1, ORKESTRA_DEV_MAILPIT=1
+# These can also be enabled via env vars: ORKESTRA_DEV_KEYCLOAK=1, ORKESTRA_DEV_MAILPIT=1,
+# ORKESTRA_DEV_AGENTS=N
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -20,14 +23,25 @@ cd "$REPO_ROOT"
 
 START_KEYCLOAK="${ORKESTRA_DEV_KEYCLOAK:-0}"
 START_MAILPIT="${ORKESTRA_DEV_MAILPIT:-0}"
+AGENT_COUNT="${ORKESTRA_DEV_AGENTS:-0}"
 
-for arg in "$@"; do
-  case "$arg" in
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --keycloak) START_KEYCLOAK=1 ;;
     --mailpit|--smtp) START_MAILPIT=1 ;;
     --all) START_KEYCLOAK=1; START_MAILPIT=1 ;;
+    --agent) AGENT_COUNT=1 ;;
+    --agents) AGENT_COUNT="${2:-}"; shift ;;
+    --agents=*) AGENT_COUNT="${1#*=}" ;;
+    *) echo "Unknown option: $1"; exit 1 ;;
   esac
+  shift
 done
+
+if ! [[ "$AGENT_COUNT" =~ ^[0-9]+$ ]]; then
+  echo "✗ Invalid agent count: '$AGENT_COUNT' (use --agent or --agents N)"
+  exit 1
+fi
 
 # ── Load .env if present ──────────────────────────────────────────────────────
 
@@ -74,6 +88,17 @@ UI_PORT="${UI_ADDR##*:}"
 AGENT_PORT="${AGENT_ADDR##*:}"
 METRICS_PORT="${METRICS_ADDR##*:}"
 
+# Agent (Docker-in-Docker) config — each agent gets its own isolated dockerd so test stacks
+# never touch the host's Docker. Agents run as host processes (from make build-dev) and reach
+# their daemon over DOCKER_HOST and the Master over the local mTLS port.
+AGENT_MASTER_ADDR="${ORKESTRA_DEV_AGENT_MASTER:-https://localhost:${AGENT_PORT}}"
+DIND_IMAGE="${ORKESTRA_DEV_DIND_IMAGE:-docker:dind}"
+DIND_BASE_PORT="${ORKESTRA_DEV_DIND_BASE_PORT:-23751}"
+AGENT_METRICS_BASE_PORT="${ORKESTRA_DEV_AGENT_METRICS_BASE_PORT:-9091}"
+AGENT_CONTAINER_PREFIX="orkestra-dev-agent"
+AGENT_DATA_PREFIX="/tmp/orkestra-dev-agent"
+AGENT_PIDS=()
+
 MASTER_PID=""
 VITE_PID=""
 
@@ -84,11 +109,20 @@ cleanup() {
   echo "→ Shutting down..."
   [[ -n "$MASTER_PID" ]] && kill "$MASTER_PID" 2>/dev/null || true
   [[ -n "$VITE_PID"   ]] && kill "$VITE_PID"   2>/dev/null || true
+  if [[ ${#AGENT_PIDS[@]} -gt 0 ]]; then
+    for pid in "${AGENT_PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
+  fi
   wait 2>/dev/null || true
   echo "→ Removing dev containers..."
   docker rm -f "$DB_CONTAINER" 2>/dev/null || true
   if [[ "$START_MAILPIT"  == "1" ]]; then docker rm -f "$MAILPIT_CONTAINER"  2>/dev/null || true; fi
   if [[ "$START_KEYCLOAK" == "1" ]]; then docker rm -f "$KEYCLOAK_CONTAINER" 2>/dev/null || true; fi
+  if [[ "$AGENT_COUNT" -gt 0 ]]; then
+    for ((i=1; i<=AGENT_COUNT; i++)); do
+      docker rm -f "${AGENT_CONTAINER_PREFIX}-${i}-dind" 2>/dev/null || true
+      rm -rf "${AGENT_DATA_PREFIX}-${i}" 2>/dev/null || true
+    done
+  fi
   rm -f "$COOKIE_JAR"
   echo "→ Done. (All dev containers removed — next start gets a fresh DB.)"
 }
@@ -99,6 +133,11 @@ trap cleanup EXIT INT TERM
 PORTS_TO_CHECK=("$UI_PORT" "$AGENT_PORT" "$METRICS_PORT" "$VITE_PORT")
 [[ "$START_KEYCLOAK" == "1" ]] && PORTS_TO_CHECK+=("$KEYCLOAK_PORT")
 [[ "$START_MAILPIT"  == "1" ]] && PORTS_TO_CHECK+=("$MAILPIT_SMTP_PORT" "$MAILPIT_UI_PORT")
+if [[ "$AGENT_COUNT" -gt 0 ]]; then
+  for ((i=1; i<=AGENT_COUNT; i++)); do
+    PORTS_TO_CHECK+=("$((DIND_BASE_PORT + i - 1))" "$((AGENT_METRICS_BASE_PORT + i - 1))")
+  done
+fi
 
 BLOCKED=""
 for port in "${PORTS_TO_CHECK[@]}"; do
@@ -311,6 +350,87 @@ auto_configure() {
 echo "→ Auto-configuring dev instance..."
 auto_configure
 
+# ── Agents (Docker-in-Docker) ─────────────────────────────────────────────────
+# Each agent runs against its own isolated dockerd (a privileged docker:dind container),
+# enrolls with a freshly minted bootstrap token, and connects to the Master over mTLS.
+
+start_agents() {
+  echo "→ Starting ${AGENT_COUNT} agent(s) with isolated Docker-in-Docker daemons..."
+
+  # Mint a multi-use enrollment token via the admin API (reuses the login cookie).
+  local token_resp raw_token
+  token_resp="$(curl -sf -b "$COOKIE_JAR" \
+      -H "Content-Type: application/json" \
+      -H "Connect-Protocol-Version: 1" \
+      -d "{\"description\":\"dev harness\",\"ttlSeconds\":3600,\"maxUses\":$((AGENT_COUNT + 5))}" \
+      "http://localhost:${UI_PORT}/orkestra.v1.AuthService/CreateEnrollmentToken" || true)"
+  raw_token="$(printf '%s' "$token_resp" | grep -o '"rawToken":"[^"]*"' | head -1 | sed 's/.*"rawToken":"//;s/"$//' || true)"
+  if [[ -z "$raw_token" ]]; then
+    echo "  ⚠ Could not mint enrollment token — skipping agents."
+    echo "    Response: $token_resp"
+    return 0
+  fi
+  echo "  ✓ Enrollment token minted"
+
+  for ((i=1; i<=AGENT_COUNT; i++)); do
+    local cname="${AGENT_CONTAINER_PREFIX}-${i}-dind"
+    local ddir="${AGENT_DATA_PREFIX}-${i}"
+    local dport="$((DIND_BASE_PORT + i - 1))"
+    local mport="$((AGENT_METRICS_BASE_PORT + i - 1))"
+    local alog="/tmp/orkestra-agent-${i}.log"
+
+    echo "  → [agent ${i}] starting DinD daemon (${cname}, docker :${dport})..."
+    docker rm -f "$cname" >/dev/null 2>&1 || true
+    if ! docker run -d --privileged --name "$cname" \
+        -e DOCKER_TLS_CERTDIR="" \
+        -p "${dport}:2375" \
+        "$DIND_IMAGE" --host=tcp://0.0.0.0:2375 >/dev/null; then
+      echo "  ⚠ could not start DinD for agent ${i} — skipping"
+      continue
+    fi
+
+    echo -n "  → [agent ${i}] waiting for DinD daemon..."
+    local ready=0
+    for _ in $(seq 1 30); do
+      if docker -H "tcp://localhost:${dport}" info >/dev/null 2>&1; then ready=1; break; fi
+      echo -n "."
+      sleep 1
+    done
+    if [[ "$ready" != "1" ]]; then
+      echo " ✗ not ready — skipping agent ${i} (check: docker logs ${cname})"
+      docker rm -f "$cname" >/dev/null 2>&1 || true
+      continue
+    fi
+    echo " ready."
+
+    # Fresh data dir, then enroll (writes agent.crt/agent.key/ca.crt/config.json).
+    rm -rf "$ddir"; mkdir -p "$ddir"
+    echo "  → [agent ${i}] enrolling as dev-agent-${i}..."
+    if ! ./bin/orkestra-agent enroll \
+        --master "$AGENT_MASTER_ADDR" \
+        --bootstrap-token "$raw_token" \
+        --name "dev-agent-${i}" \
+        --data-dir "$ddir" \
+        --log-level debug >> "$alog" 2>&1; then
+      echo "  ⚠ enrollment failed for agent ${i} — see ${alog}"
+      docker rm -f "$cname" >/dev/null 2>&1 || true
+      continue
+    fi
+
+    # Serve, pointing the agent at its own isolated DinD daemon.
+    echo "  → [agent ${i}] starting (logs → ${alog})"
+    DOCKER_HOST="tcp://localhost:${dport}" \
+    ORKESTRA_AGENT_METRICS_ADDR="0.0.0.0:${mport}" \
+      ./bin/orkestra-agent serve --data-dir "$ddir" --log-level debug >> "$alog" 2>&1 &
+    AGENT_PIDS+=("$!")
+    echo "  ✓ [agent ${i}] running (pid $!, docker via tcp://localhost:${dport})"
+  done
+}
+
+if [[ "$AGENT_COUNT" -gt 0 ]]; then
+  start_agents
+fi
+
 # ── Vite ─────────────────────────────────────────────────────────────────────
 
 echo "→ Starting Vite dev server (logs → $VITE_LOG)"
@@ -343,6 +463,10 @@ if [[ "$START_KEYCLOAK" == "1" ]]; then
   printf "│  Keycloak: http://localhost:%-21s│\n" "${KEYCLOAK_PORT}         "
 fi
 
+if [[ ${#AGENT_PIDS[@]} -gt 0 ]]; then
+  printf "│  Agents:   %-38s│\n" "${#AGENT_PIDS[@]} running (isolated DinD)"
+fi
+
 echo "│                                                  │"
 echo "│  Ctrl+C to stop everything                      │"
 echo "└──────────────────────────────────────────────────┘"
@@ -354,6 +478,21 @@ printf "│  Email:    %-38s│\n" "$DEV_ADMIN_EMAIL"
 printf "│  Password: %-38s│\n" "$DEV_ADMIN_PASSWORD"
 echo "│                                                  │"
 echo "└──────────────────────────────────────────────────┘"
+
+if [[ ${#AGENT_PIDS[@]} -gt 0 ]]; then
+  echo ""
+  echo "┌─ Agents (isolated Docker-in-Docker) ─────────────┐"
+  echo "│                                                  │"
+  for ((i=1; i<=AGENT_COUNT; i++)); do
+    dport="$((DIND_BASE_PORT + i - 1))"
+    printf "│  dev-agent-%-2s log: /tmp/orkestra-agent-%-2s.log   │\n" "${i}" "${i}"
+    printf "│    inspect: docker -H tcp://localhost:%-11s│\n" "${dport} ps"
+  done
+  echo "│                                                  │"
+  echo "│  Agents appear on the Servers page once online.  │"
+  echo "│  Their stacks run ONLY in their own DinD daemon. │"
+  echo "└──────────────────────────────────────────────────┘"
+fi
 
 if [[ "$START_MAILPIT" == "1" ]]; then
   echo ""

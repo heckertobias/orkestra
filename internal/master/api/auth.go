@@ -1144,12 +1144,44 @@ func (h *AuthServiceHandler) ListEnrollmentTokens(ctx context.Context, _ *connec
 	return connect.NewResponse(&orkestraV1.ListEnrollmentTokensResponse{Tokens: tokens}), nil
 }
 
-// CreateEnrollmentToken creates a new enrollment token (admin only).
+// CreateEnrollmentToken creates a new enrollment token (admin only). The raw token is
+// returned exactly once (never stored in plaintext) for the operator to hand to an agent.
 func (h *AuthServiceHandler) CreateEnrollmentToken(ctx context.Context, req *connect.Request[orkestraV1.CreateEnrollmentTokenRequest]) (*connect.Response[orkestraV1.EnrollmentToken], error) {
 	if err := requireRole(ctx, "admin"); err != nil {
 		return nil, err
 	}
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("use the existing enroll endpoint for token creation"))
+
+	ttl := time.Duration(req.Msg.TtlSeconds) * time.Second
+	if ttl <= 0 {
+		ttl = time.Hour
+	}
+	maxUses := int(req.Msg.MaxUses)
+	if maxUses <= 0 {
+		maxUses = 1
+	}
+
+	var createdBy *string
+	if u := masterauth.UserFromContext(ctx); u != nil {
+		createdBy = &u.ID
+	}
+
+	now := time.Now()
+	rawToken, id, err := pki.CreateEnrollmentToken(ctx, h.db, req.Msg.Description, ttl, maxUses, createdBy)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("create enrollment token: %w", err))
+	}
+
+	return connect.NewResponse(&orkestraV1.EnrollmentToken{
+		Id:          id,
+		Description: req.Msg.Description,
+		TtlSeconds:  int32(ttl.Seconds()),
+		MaxUses:     int32(maxUses),
+		UsedCount:   0,
+		ExpiresAt:   now.Add(ttl).UnixMilli(),
+		CreatedAt:   now.UnixMilli(),
+		Revoked:     false,
+		RawToken:    rawToken,
+	}), nil
 }
 
 // RevokeEnrollmentToken revokes an enrollment token (admin only).

@@ -62,8 +62,13 @@ func (h *Handler) Enroll(ctx context.Context, req *connect.Request[orkestraV1.En
 		return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("invalid or expired bootstrap token"))
 	}
 
-	// Sign CSR.
-	certPEM, serial, err := h.ca.SignCSR(r.CsrPem, certTTL)
+	// Assign the agent identity (used as the DB server id AND the client-cert CN, so every
+	// subsequent RPC — identified by cert CN — maps back to this row). The master assigns the
+	// CN; the agent does not get to choose its own identity via the CSR subject.
+	agentID := uuid.NewString()
+
+	// Sign CSR with the master-assigned CN.
+	certPEM, serial, err := h.ca.SignCSRWithCN(r.CsrPem, agentID, certTTL)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("sign CSR: %w", err))
 	}
@@ -73,7 +78,6 @@ func (h *Handler) Enroll(ctx context.Context, req *connect.Request[orkestraV1.En
 	}
 
 	// Create or update server record.
-	agentID := uuid.NewString()
 	now := time.Now().UnixMilli()
 	info := r.NodeInfo
 
@@ -180,7 +184,8 @@ func (h *Handler) RenewCert(ctx context.Context, req *connect.Request[orkestraV1
 		return nil, connect.NewError(connect.CodeUnauthenticated, err)
 	}
 
-	certPEM, serial, err := h.ca.SignCSR(req.Msg.CsrPem, certTTL)
+	// Re-sign with the same master-assigned CN so the renewed cert keeps the agent identity.
+	certPEM, serial, err := h.ca.SignCSRWithCN(req.Msg.CsrPem, agentID, certTTL)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("sign CSR: %w", err))
 	}

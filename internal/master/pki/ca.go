@@ -14,6 +14,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"net"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -71,8 +72,21 @@ func LoadOrCreate(ctx context.Context, db *pgxpool.Pool, kek []byte) (*CA, error
 	return ca, nil
 }
 
-// SignCSR signs a PKCS#10 CSR and returns a PEM-encoded client certificate.
+// SignCSR signs a PKCS#10 CSR and returns a PEM-encoded client certificate, preserving the
+// subject from the CSR.
 func (ca *CA) SignCSR(csrPEM string, ttl time.Duration) (certPEM string, serial string, err error) {
+	return ca.signCSR(csrPEM, "", ttl)
+}
+
+// SignCSRWithCN signs a CSR but forces the certificate's Common Name to cn, ignoring whatever
+// subject the requester put in the CSR. Only the CSR's public key is trusted — the identity
+// (CN) is assigned by the master. This keeps the client-cert CN, which every agent RPC uses
+// to identify the agent, in lockstep with the master-assigned agent ID.
+func (ca *CA) SignCSRWithCN(csrPEM, cn string, ttl time.Duration) (certPEM string, serial string, err error) {
+	return ca.signCSR(csrPEM, cn, ttl)
+}
+
+func (ca *CA) signCSR(csrPEM, overrideCN string, ttl time.Duration) (certPEM string, serial string, err error) {
 	block, _ := pem.Decode([]byte(csrPEM))
 	if block == nil || block.Type != "CERTIFICATE REQUEST" {
 		return "", "", fmt.Errorf("invalid CSR PEM")
@@ -85,6 +99,11 @@ func (ca *CA) SignCSR(csrPEM string, ttl time.Duration) (certPEM string, serial 
 		return "", "", fmt.Errorf("CSR signature invalid: %w", err)
 	}
 
+	subject := csr.Subject
+	if overrideCN != "" {
+		subject = pkix.Name{CommonName: overrideCN}
+	}
+
 	serialNum, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
 		return "", "", err
@@ -92,7 +111,7 @@ func (ca *CA) SignCSR(csrPEM string, ttl time.Duration) (certPEM string, serial 
 	now := time.Now()
 	tmpl := &x509.Certificate{
 		SerialNumber: serialNum,
-		Subject:      csr.Subject,
+		Subject:      subject,
 		NotBefore:    now.Add(-time.Minute),
 		NotAfter:     now.Add(ttl),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
@@ -104,6 +123,47 @@ func (ca *CA) SignCSR(csrPEM string, ttl time.Duration) (certPEM string, serial 
 	}
 	certPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}))
 	return certPEM, serialNum.Text(16), nil
+}
+
+// IssueServerCert generates a fresh leaf TLS server certificate signed by the CA, valid for
+// the given DNS names and IP addresses (SANs). It is used for the Agent gRPC listener so
+// agents — which pin this CA as their root — can verify the master's hostname. The leaf key
+// is generated in-memory and never persisted; a new leaf is minted on each master start
+// (agents trust the CA, not the leaf, so leaf rotation is transparent).
+func (ca *CA) IssueServerCert(dnsNames []string, ips []net.IP) (tls.Certificate, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("generate server key: %w", err)
+	}
+	serialNum, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	now := time.Now()
+	tmpl := &x509.Certificate{
+		SerialNumber: serialNum,
+		Subject:      pkix.Name{CommonName: "orkestra-master"},
+		NotBefore:    now.Add(-time.Minute),
+		NotAfter:     now.Add(10 * 365 * 24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:     dnsNames,
+		IPAddresses:  ips,
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, ca.cert, &key.PublicKey, ca.key)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("sign server cert: %w", err)
+	}
+	leaf, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("parse server cert: %w", err)
+	}
+	// Present the leaf plus the CA cert so agents can build the chain to their pinned CA.
+	return tls.Certificate{
+		Certificate: [][]byte{certDER, ca.cert.Raw},
+		PrivateKey:  key,
+		Leaf:        leaf,
+	}, nil
 }
 
 // CertFingerprint returns the hex SHA-256 fingerprint of a PEM-encoded certificate.
