@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"sort"
 
 	composetypes "github.com/compose-spec/compose-go/v2/types"
 	"github.com/docker/docker/api/types/container"
+	imagetypes "github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/strslice"
@@ -144,6 +146,8 @@ func createAndStart(ctx context.Context, dc *client.Client, stackID, projectName
 	image := svc.Image
 	if image == "" {
 		image = projectName + "_" + svcName
+	} else if err := ensureImage(ctx, dc, image, svc.PullPolicy); err != nil {
+		return err
 	}
 
 	var cmd, entrypoint strslice.StrSlice
@@ -180,6 +184,55 @@ func createAndStart(ctx context.Context, dc *client.Client, stackID, projectName
 		return fmt.Errorf("ContainerCreate: %w", err)
 	}
 	return dc.ContainerStart(ctx, resp.ID, container.StartOptions{})
+}
+
+// ensureImage makes the image available locally before a container is created, honoring the
+// service's Compose pull_policy. Without this, ContainerCreate fails with "No such image" for
+// any image not already present in the daemon.
+//
+// Pulls are anonymous (no registry credentials) — private registries are not yet supported.
+func ensureImage(ctx context.Context, dc *client.Client, ref, pullPolicy string) error {
+	present := true
+	if pullPolicy != composetypes.PullPolicyAlways {
+		// Only the presence check drives the "missing" policies; "always" pulls regardless.
+		if _, err := dc.ImageInspect(ctx, ref); err != nil {
+			if !client.IsErrNotFound(err) {
+				return fmt.Errorf("inspect image %s: %w", ref, err)
+			}
+			present = false
+		}
+	}
+
+	if !shouldPull(pullPolicy, present) {
+		return nil
+	}
+
+	slog.Info("pulling image", "image", ref, "pull_policy", pullPolicy)
+	rc, err := dc.ImagePull(ctx, ref, imagetypes.PullOptions{})
+	if err != nil {
+		return fmt.Errorf("pull image %s: %w", ref, err)
+	}
+	defer rc.Close()
+	// The pull only completes once the progress stream has been fully consumed.
+	if _, err := io.Copy(io.Discard, rc); err != nil {
+		return fmt.Errorf("pull image %s: %w", ref, err)
+	}
+	return nil
+}
+
+// shouldPull decides whether to pull an image given the Compose pull_policy and whether the
+// image is already present locally. An empty policy defaults to "missing" (Compose default).
+// "never" and "build" never pull — for "never" a missing image lets ContainerCreate fail loudly,
+// and "build" images are not fetched from a registry.
+func shouldPull(policy string, present bool) bool {
+	switch policy {
+	case composetypes.PullPolicyAlways:
+		return true
+	case composetypes.PullPolicyNever, composetypes.PullPolicyBuild:
+		return false
+	default: // "missing", "if_not_present", or unset
+		return !present
+	}
 }
 
 func specHash(svc composetypes.ServiceConfig) string {
