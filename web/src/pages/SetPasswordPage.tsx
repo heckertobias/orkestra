@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useSearchParams, useNavigate, Link } from 'react-router-dom'
+import logo from '@/assets/logo.webp'
 
 export function SetPasswordPage() {
   const [params] = useSearchParams()
@@ -51,12 +52,9 @@ export function SetPasswordPage() {
     <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg)' }}>
       <div className="w-full max-w-sm">
         {/* Logo */}
-        <div className="flex items-center justify-center gap-3 mb-8">
-          <div className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold"
-            style={{ backgroundColor: 'var(--accent)', color: '#0d1117' }}>
-            O
-          </div>
-          <span className="text-xl font-semibold" style={{ color: 'var(--text)' }}>
+        <div className="flex flex-col items-center gap-3 mb-8">
+          <img src={logo} alt="orkestra" className="w-[90%] h-auto" />
+          <span className="text-3xl leading-none font-semibold" style={{ color: 'var(--text)' }}>
             ork<span style={{ color: 'var(--accent)' }}>estra</span>
           </span>
         </div>

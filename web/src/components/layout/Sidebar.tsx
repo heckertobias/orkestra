@@ -2,6 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { Server, Layers, KeyRound, Users, LayoutDashboard, Settings, ClipboardList, LogOut } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { useAuth, isAdmin, canManageSecrets } from '@/lib/auth'
+import logoMark from '@/assets/logo-mark.webp'
 
 export function Sidebar() {
   const { user } = useAuth()
@@ -23,12 +24,7 @@ export function Sidebar() {
     >
       {/* Logo */}
       <div className="flex items-center gap-3 px-4 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
-        <div
-          className="w-7 h-7 rounded flex items-center justify-center text-xs font-bold"
-          style={{ backgroundColor: 'var(--accent)', color: '#0d1117' }}
-        >
-          O
-        </div>
+        <img src={logoMark} alt="orkestra" className="w-7 h-7 rounded" />
         <span className="font-semibold text-sm" style={{ color: 'var(--text)' }}>
           ork<span style={{ color: 'var(--accent)' }}>estra</span>
         </span>
