@@ -20,7 +20,8 @@ Key log fields used consistently:
 
 ### Metrics (Prometheus)
 
-`/metrics` endpoint on `:9090` (Master) and `:9091` (Agent, configurable).
+`/metrics` endpoint on `:9090` (Master). Agents expose `:9091` locally, but you don't scrape it
+directly — see **Federated agent metrics** below.
 
 **Master metrics:**
 
@@ -45,6 +46,33 @@ Key log fields used consistently:
 | `orkestra_agent_reconcile_errors_total` | Counter | Reconcile errors by `stack_id` |
 | `orkestra_agent_docker_api_duration_seconds` | Histogram | Docker SDK call latency by `operation` |
 | `orkestra_agent_stream_reconnects_total` | Counter | Master stream reconnects |
+
+#### Federated agent metrics
+
+Agents connect **outbound** only, so their `:9091` endpoint is not reachable from a central
+Prometheus without opening inbound ports per host. Instead, the Master **federates** them: on
+request it asks the target agent for its metrics over the existing mTLS stream and returns them.
+
+- **Endpoint:** `GET /api/agents/{agent_id}/metrics` on the Master's UI/API port (behind `443`).
+- **Auth:** same as the rest of the API — a session cookie or a **Bearer API key**. Create an API
+  key for a scrape user and configure Prometheus with `authorization.credentials`.
+- Returns Prometheus text exposition format; `503` if the agent is offline.
+
+Example Prometheus scrape config (one target per agent, or via service discovery):
+
+```yaml
+scrape_configs:
+  - job_name: orkestra-agents
+    scheme: https
+    authorization:
+      credentials: "<orkestra-api-key>"
+    metrics_path: /api/agents/<agent_id>/metrics
+    static_configs:
+      - targets: ["orkestra.example.com"]   # the Master, not the agent
+```
+
+No inbound port is required on the agent hosts; the only agent-facing hole in the firewall is the
+Master's agent port `4440`.
 
 ### Health Endpoints (Master)
 
@@ -89,7 +117,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "8443:8443"   # Agent gRPC (mTLS)
+      - "4440:4440"   # Agent gRPC (mTLS) — 4440 = orchestra concert pitch A440
       - "8080:8080"   # Web UI + API
     secrets:
       - orkestra_master_key
@@ -100,7 +128,7 @@ services:
       # KEK is read from the secret mount — never set ORKESTRA_MASTER_KEY here
       ORKESTRA_MASTER_KEY_FILE: /run/secrets/orkestra_master_key
       ORKESTRA_DATABASE_URL: "postgres://orkestra:${POSTGRES_PASSWORD}@postgres:5432/orkestra?sslmode=disable"
-      ORKESTRA_AGENT_ADDR: "0.0.0.0:8443"
+      ORKESTRA_AGENT_ADDR: "0.0.0.0:4440"
       ORKESTRA_UI_ADDR: "0.0.0.0:8080"
       ORKESTRA_LOG_LEVEL: info
       # ORKESTRA_TLS_CERT: /tls/server.crt
@@ -162,7 +190,7 @@ WantedBy=multi-user.target
 `/etc/orkestra/master/env` (DB credentials only — no KEK here):
 ```
 ORKESTRA_DATABASE_URL=postgres://orkestra:<password>@localhost:5432/orkestra?sslmode=disable
-ORKESTRA_AGENT_ADDR=0.0.0.0:8443
+ORKESTRA_AGENT_ADDR=0.0.0.0:4440
 ORKESTRA_UI_ADDR=0.0.0.0:8080
 ORKESTRA_MASTER_KEY_FILE=/etc/orkestra/master/master.key
 ```
@@ -181,6 +209,63 @@ chown root:root /etc/orkestra/master/master.key
 
 ---
 
+## Ingress & Networking
+
+The Master exposes two externally-relevant endpoints on **separate ports** (plus internal metrics):
+
+| Port | Purpose | Exposure |
+|---|---|---|
+| `8080` | Web UI + API (browser, Connect protocol) | Public — typically behind a reverse proxy terminating TLS on `443` |
+| `4440` | Agent gRPC (mTLS, HTTP/2) | Open to agents; **TLS passthrough only** — must NOT be terminated by a proxy |
+| `9090` | Prometheus metrics (Master) | Internal only — bind to loopback / firewall off |
+
+> Why `4440`? It's the orchestra concert pitch **A = 440 Hz** — distinctive and unlikely to
+> collide with common services (unlike the crowded `8443`).
+
+### Behind a domain / reverse proxy
+
+Typical setup: the UI lives behind a public domain (e.g. `https://orkestra.example.com`) while
+the agent channel keeps its own port.
+
+- **UI (`8080`):** a reverse proxy (nginx/Traefik/Caddy) terminates Let's Encrypt on `443`
+  and forwards to `:8080`. Standard HTTPS.
+- **Agent mTLS (`4440`):** must be reachable end-to-end. **Do not terminate TLS at the proxy** —
+  agents pin the Master's *internal CA*, so a public-cert proxy would break the handshake.
+  Either forward the port directly, or use a **TCP/SNI passthrough** (nginx `stream` with
+  `ssl_preread`, or Traefik TCP with SNI) that does not decrypt. Agents enroll with
+  `--master https://orkestra.example.com:4440`.
+- **Required:** add the public hostname to the Master's agent-cert SANs via
+  **`ORKESTRA_AGENT_TLS_SANS`** (comma-separated hostnames/IPs). Loopback names
+  (`localhost`, `127.0.0.1`, `::1`) are always included automatically. Without this, agents
+  dialing the public name fail certificate verification.
+
+```
+# Master env
+ORKESTRA_AGENT_ADDR=0.0.0.0:4440
+ORKESTRA_UI_ADDR=0.0.0.0:8080
+ORKESTRA_AGENT_TLS_SANS=orkestra.example.com
+```
+
+Agent metrics need **no** inbound port on the agent hosts — they are federated through the
+Master (see *Observability → Metrics*). The only agent-facing hole in the firewall is `4440`
+on the Master.
+
+### Co-locating the Master and an Agent on one host
+
+The Master and an Agent can run on the same host without conflict:
+
+- **No port clash:** the Master listens on `8080`/`4440`/`9090`; the Agent has no inbound
+  listeners at all (it dials *outbound* to the Master), only a local metrics endpoint.
+- **Docker socket:** only the Agent needs `/var/run/docker.sock`; the Master never touches Docker.
+- **Loopback works out of the box:** a co-located agent enrolls with
+  `--master https://localhost:4440` — loopback SANs are always present.
+- **Caution:** a co-located agent controls the host's Docker daemon. If you assign it a stack
+  that includes the Master's own containers, the agent could recreate/stop the Master. Keep the
+  Master's stack off the co-located agent until fleet-managed self-updates land (see
+  `docs/09-updates.md`).
+
+---
+
 ## Deployment: Agent
 
 ### install-agent.sh
@@ -190,7 +275,7 @@ chown root:root /etc/orkestra/master/master.key
 ```bash
 #!/usr/bin/env bash
 # Usage: ./install-agent.sh \
-#   --master https://master.example.com:8443 \
+#   --master https://master.example.com:4440 \
 #   --bootstrap-token <token> \
 #   --name "web-server-01" \
 #   [--version latest]
@@ -229,7 +314,7 @@ WantedBy=multi-user.target
 
 `/etc/orkestra/agent/env`:
 ```
-ORKESTRA_MASTER_ADDR=https://master.example.com:8443
+ORKESTRA_MASTER_ADDR=https://master.example.com:4440
 ORKESTRA_AGENT_DATA=/etc/orkestra/agent
 ORKESTRA_LOG_LEVEL=info
 ```
@@ -237,6 +322,21 @@ ORKESTRA_LOG_LEVEL=info
 > **Note on `User=root`:** The Agent needs `/var/run/docker.sock` access. If the Docker socket
 > is accessible to a `docker` group, `User=orkestra` with `SupplementaryGroups=docker` is
 > preferred. The install script detects this and sets up accordingly.
+
+### Agent in a container (TrueNAS SCALE & other Docker hosts)
+
+The agent ships as a multi-arch image `ghcr.io/heckertobias/orkestra-agent`. In a container it
+**auto-enrolls** on first boot when `ORKESTRA_MASTER_ADDR` + `ORKESTRA_BOOTSTRAP_TOKEN` are set
+(the distroless image has no shell for an entrypoint script), then reuses the stored certificate
+on restart. Requirements:
+
+- Mount `/var/run/docker.sock` and run as a uid that can access it (root on TrueNAS).
+- Persist `/var/lib/orkestra` (the image sets `ORKESTRA_AGENT_DATA` there) — it holds the cert.
+- Enroll against the Master's agent port `:4440`.
+
+For **TrueNAS SCALE** specifically — a ready-to-paste *Custom App* YAML and a guided *catalog
+app* (with a labeled install form) live under [`deploy/truenas/`](../deploy/truenas/); see its
+`README.md`.
 
 ---
 

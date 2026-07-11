@@ -25,7 +25,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "8443:8443"   # Agent gRPC (mTLS)
+      - "4440:4440"   # Agent gRPC (mTLS) — 4440 = orchestra concert pitch A440
       - "8080:8080"   # Web UI + API
       - "9090:9090"   # Prometheus metrics (restrict at firewall — do not expose publicly)
     secrets:
@@ -37,7 +37,7 @@ services:
       # KEK is read from the secret mount — never set ORKESTRA_MASTER_KEY here
       ORKESTRA_MASTER_KEY_FILE: /run/secrets/orkestra_master_key
       ORKESTRA_DATABASE_URL: "postgres://orkestra:${POSTGRES_PASSWORD}@postgres:5432/orkestra?sslmode=disable"
-      ORKESTRA_AGENT_ADDR: "0.0.0.0:8443"
+      ORKESTRA_AGENT_ADDR: "0.0.0.0:4440"
       ORKESTRA_UI_ADDR: "0.0.0.0:8080"
       ORKESTRA_METRICS_ADDR: "0.0.0.0:9090"
       ORKESTRA_LOG_LEVEL: info

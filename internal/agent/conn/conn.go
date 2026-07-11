@@ -93,10 +93,40 @@ func (a *Agent) connect(ctx context.Context) error {
 		connect.WithGRPC(),
 	)
 
-	stream := client.Connect(ctx)
+	// Per-connection context so the writer/heartbeat goroutines are torn down when this attempt
+	// ends (on return, defer cancel() closes the stream and stops the goroutines).
+	connCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	// Send Hello.
-	if err := stream.Send(&orkestraV1.AgentMessage{
+	stream := client.Connect(connCtx)
+
+	// Single writer: every stream.Send goes through sendCh so the bidi stream is only written
+	// from one goroutine (Hello, heartbeats, and metrics responses).
+	sendCh := make(chan *orkestraV1.AgentMessage, 16)
+	go func() {
+		for {
+			select {
+			case <-connCtx.Done():
+				return
+			case m := <-sendCh:
+				if err := stream.Send(m); err != nil {
+					slog.Debug("stream send error", "err", err)
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
+	send := func(m *orkestraV1.AgentMessage) {
+		select {
+		case sendCh <- m:
+		case <-connCtx.Done():
+		}
+	}
+
+	// Hello first (ordered — a single writer drains sendCh FIFO).
+	send(&orkestraV1.AgentMessage{
 		Payload: &orkestraV1.AgentMessage_Hello{
 			Hello: &orkestraV1.Hello{
 				AgentId:      a.cfg.AgentID,
@@ -104,34 +134,25 @@ func (a *Agent) connect(ctx context.Context) error {
 				Hostname:     hostname(),
 			},
 		},
-	}); err != nil {
-		return fmt.Errorf("send Hello: %w", err)
-	}
+	})
 	slog.Info("connected to master", "master", a.cfg.MasterAddr, "agent_id", a.cfg.AgentID)
 
-	// Start heartbeat ticker.
+	// Periodic StatusReports (heartbeat).
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-
-	// Goroutine: send periodic StatusReports.
-	heartbeatDone := make(chan struct{})
 	go func() {
-		defer close(heartbeatDone)
 		for {
 			select {
-			case <-ctx.Done():
+			case <-connCtx.Done():
 				return
 			case <-ticker.C:
-				if err := stream.Send(&orkestraV1.AgentMessage{
+				send(&orkestraV1.AgentMessage{
 					Payload: &orkestraV1.AgentMessage_StatusReport{
 						StatusReport: &orkestraV1.StatusReport{
 							ReportedAtMs: time.Now().UnixMilli(),
 						},
 					},
-				}); err != nil {
-					slog.Warn("heartbeat send error", "err", err)
-					return
-				}
+				})
 			}
 		}
 	}()
@@ -142,14 +163,37 @@ func (a *Agent) connect(ctx context.Context) error {
 		if err != nil {
 			break
 		}
+		// Metrics federation: answer a MetricsRequest directly over the stream (correlated by
+		// request_id) instead of routing it through the user message handler.
+		if msg.GetMetricsRequest() != nil {
+			a.handleMetricsRequest(msg.RequestId, send)
+			continue
+		}
 		if a.handler != nil {
-			if err := a.handler(ctx, msg); err != nil {
+			if err := a.handler(connCtx, msg); err != nil {
 				slog.Error("message handler error", "err", err)
 			}
 		}
 	}
 
 	return stream.CloseResponse()
+}
+
+// handleMetricsRequest gathers the agent's current Prometheus metrics and sends them back to the
+// Master as a MetricsResponse carrying the original request_id.
+func (a *Agent) handleMetricsRequest(requestID string, send func(*orkestraV1.AgentMessage)) {
+	resp := &orkestraV1.MetricsResponse{}
+	text, err := agentmetrics.Gather()
+	if err != nil {
+		resp.Error = err.Error()
+		slog.Warn("gather metrics for master", "err", err)
+	} else {
+		resp.PrometheusText = text
+	}
+	send(&orkestraV1.AgentMessage{
+		RequestId: requestID,
+		Payload:   &orkestraV1.AgentMessage_MetricsResponse{MetricsResponse: resp},
+	})
 }
 
 // checkAndRenewCert renews the agent's mTLS cert if it expires within renewThreshold.

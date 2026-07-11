@@ -1,0 +1,7 @@
+categories:
+  - management
+icon_url: https://raw.githubusercontent.com/heckertobias/orkestra/main/web/public/orkestra-mark.webp
+tags:
+  - orchestration
+  - docker
+  - compose

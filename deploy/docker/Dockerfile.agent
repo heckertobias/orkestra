@@ -2,9 +2,16 @@ FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY orkestra-agent /usr/local/bin/orkestra-agent
 
+# Persist enrollment (cert/key/config) on the declared volume. The binary's bare-metal default
+# is /etc/orkestra/agent; in the container we point it at the VOLUME so restarts reuse the cert.
+ENV ORKESTRA_AGENT_DATA=/var/lib/orkestra
+
+# Local Prometheus endpoint. Not required inbound — metrics are federated through the Master.
 EXPOSE 9091
 
 VOLUME ["/var/lib/orkestra"]
 
+# `serve` auto-enrolls on first boot when ORKESTRA_MASTER_ADDR + ORKESTRA_BOOTSTRAP_TOKEN are set
+# (the distroless base has no shell for an entrypoint script), then reconnects using the stored cert.
 ENTRYPOINT ["/usr/local/bin/orkestra-agent"]
 CMD ["serve"]

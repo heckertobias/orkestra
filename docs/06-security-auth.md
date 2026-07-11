@@ -39,7 +39,7 @@ On first start, the Master generates a **self-signed CA** (ECDSA P-384):
 
 3. On the target server:
    ./orkestra-agent enroll \
-     --master https://master.example.com:8443 \
+     --master https://master.example.com:4440 \
      --bootstrap-token <token> \
      --name "web-server-01"
 
@@ -187,7 +187,7 @@ responsibility. This is intentional: the interceptor is the single enforcement p
 
 | Endpoint | TLS | Auth |
 |---|---|---|
-| `:8443` (Agent gRPC) | mTLS (required) | Client cert (signed by internal CA) |
+| `:4440` (Agent gRPC) | mTLS (required) | Client cert (signed by internal CA) |
 | `:8080` (UI + API) | TLS (server-only, or reverse proxy) | Session cookie / API key |
 | `:9090` (Prometheus metrics) | None (bind loopback by default) | — |
 
@@ -269,7 +269,7 @@ it as a Docker/K8s `secret:` (mounted as tmpfs), a systemd `LoadCredential`, or 
       `chmod 600` file — **never** as a plain env var in the same config as DB credentials.
 - [x] KEK is a random 256-bit value, backed up separately from the database (password manager / HSM).
 - [x] PostgreSQL access is restricted to the `orkestra` DB user; TLS is enforced on the connection.
-- [x] Port `:8443` is firewalled to Agent IPs only (or the Master is on a private network).
+- [x] Port `:4440` is firewalled to Agent IPs only (or the Master is on a private network).
 - [x] Port `:9090` is bound to loopback or protected by a scrape-IP allowlist.
 - [x] TLS cert on `:8080` is valid (Let's Encrypt or internal PKI).
 - [x] Bootstrap tokens are single-use and have short TTLs (< 1 hour).

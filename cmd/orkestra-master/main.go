@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -42,7 +43,7 @@ var publicProcedures = map[string]bool{
 func main() {
 	var (
 		uiAddr      = flag.String("ui-addr", envOrDefault("ORKESTRA_UI_ADDR", "0.0.0.0:8080"), "UI & API listen address")
-		agentAddr   = flag.String("agent-addr", envOrDefault("ORKESTRA_AGENT_ADDR", "0.0.0.0:8443"), "Agent gRPC listen address")
+		agentAddr   = flag.String("agent-addr", envOrDefault("ORKESTRA_AGENT_ADDR", "0.0.0.0:4440"), "Agent gRPC listen address")
 		metricsAddr = flag.String("metrics-addr", envOrDefault("ORKESTRA_METRICS_ADDR", "0.0.0.0:9090"), "Prometheus metrics listen address")
 		dbURL       = flag.String("db", envOrDefault("ORKESTRA_DATABASE_URL", ""), "PostgreSQL DSN (required)")
 		logLevel    = flag.String("log-level", envOrDefault("ORKESTRA_LOG_LEVEL", "info"), "Log level (debug|info|warn|error)")
@@ -238,6 +239,28 @@ func main() {
 	uiMux.Handle(authPath, authSvcHandler)
 	uiMux.HandleFunc("/api/setup", masterauth.RateLimitMiddleware(authHandler.SetupHTTPHandler))
 	uiMux.HandleFunc("/api/audit", authHandler.AuditLogHTTPHandler)
+	// Federated agent metrics: Prometheus scrapes the Master (authenticated via session cookie or
+	// a Bearer API key), which fetches the target agent's metrics over the mTLS stream. No inbound
+	// port is needed on the agent hosts.
+	uiMux.HandleFunc("GET /api/agents/{id}/metrics", func(w http.ResponseWriter, r *http.Request) {
+		if masterauth.UserFromContext(r.Context()) == nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		fetchCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+		text, err := gwHandler.FetchAgentMetrics(fetchCtx, r.PathValue("id"))
+		if err != nil {
+			if errors.Is(err, agentgw.ErrAgentNotConnected) {
+				http.Error(w, "agent not connected", http.StatusServiceUnavailable)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		_, _ = w.Write([]byte(text))
+	})
 	uiMux.HandleFunc("/auth/oidc/status", oidcProvider.StatusHandler)
 	uiMux.HandleFunc("/auth/oidc/login", oidcProvider.LoginHandler)
 	uiMux.HandleFunc("/auth/oidc/callback", oidcProvider.CallbackHandler(q, 24*time.Hour))

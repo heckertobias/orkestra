@@ -87,7 +87,8 @@ via `go:embed`. The `dev` build tag swaps the embed for a proxy to the Vite dev 
   (e.g. `ORKESTRA_UI_ADDR`, `ORKESTRA_AGENT_ADDR`, `ORKESTRA_AGENT_DATA`, `ORKESTRA_DATABASE_URL`,
   `ORKESTRA_MASTER_KEY_FILE`, `ORKESTRA_KEY_SOURCE`).
 - The agent binary is subcommand-based: `orkestra-agent serve|enroll`. The master takes flags only.
-- Default ports: `8443` Agent gRPC (mTLS, HTTP/2), `8080` UI/API, `9090` Prometheus metrics.
+- Default ports: `4440` Agent gRPC (mTLS, HTTP/2; 4440 = orchestra concert pitch A440),
+  `8080` UI/API, `9090` Prometheus metrics.
 - Structured logging via stdlib `log/slog`; version info is injected at build time via `-ldflags`
   into `internal/shared/version`.
 - The KEK (for CA key + secret encryption at rest) is loaded via a pluggable `KeySource`

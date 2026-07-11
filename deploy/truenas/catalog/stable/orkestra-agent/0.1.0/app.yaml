@@ -1,0 +1,32 @@
+name: orkestra-agent
+title: orkestra Agent
+app_version: "0.1.0"
+version: "1.0.0"
+train: stable
+description: >-
+  orkestra Agent — reconciles this host's Docker Compose stacks toward the desired state
+  managed centrally by the orkestra Master. Connects outbound over mTLS; no inbound ports needed.
+home: https://github.com/heckertobias/orkestra
+sources:
+  - https://github.com/heckertobias/orkestra
+maintainers:
+  - name: heckertobias
+    url: https://github.com/heckertobias
+categories:
+  - management
+keywords:
+  - orchestration
+  - docker
+  - compose
+# The agent runs as root to reach the Docker socket (root:root on TrueNAS).
+run_as_context:
+  - description: orkestra Agent controls Docker via the host socket.
+    uid: 0
+    gid: 0
+host_mounts:
+  - description: Docker socket (control plane for the agent)
+    host_path: /var/run/docker.sock
+capabilities: []
+# NOTE: TrueNAS middleware may additionally require `lib_version` / `lib_version_hash` pinning
+# the shared ix app library. This app uses a self-contained compose template (no ix-lib helpers);
+# validate the exact required fields against your target TrueNAS version — see ../../../README.md.

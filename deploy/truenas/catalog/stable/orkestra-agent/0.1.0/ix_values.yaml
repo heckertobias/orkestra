@@ -1,0 +1,11 @@
+image:
+  repository: ghcr.io/heckertobias/orkestra-agent
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+# Defaults for optional questions (overridden by the install form).
+logLevel: info
+agentName: ""
+dockerSocket: /var/run/docker.sock
+storage:
+  type: ix_volume

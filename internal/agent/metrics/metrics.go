@@ -2,9 +2,30 @@
 package metrics
 
 import (
+	"bytes"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/common/expfmt"
 )
+
+// Gather collects the current metrics from the default registry and returns them in Prometheus
+// text exposition format — the same content promhttp.Handler() serves on the local metrics port.
+// Used to federate agent metrics to the Master over the mTLS stream (see MetricsResponse).
+func Gather() (string, error) {
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		return "", err
+	}
+	var buf bytes.Buffer
+	enc := expfmt.NewEncoder(&buf, expfmt.NewFormat(expfmt.TypeTextPlain))
+	for _, mf := range mfs {
+		if err := enc.Encode(mf); err != nil {
+			return "", err
+		}
+	}
+	return buf.String(), nil
+}
 
 var (
 	ContainersRunning = promauto.NewGauge(prometheus.GaugeOpts{

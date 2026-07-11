@@ -340,9 +340,10 @@ channel. If the browser is slow, the Agent slows down. This prevents unbounded b
 
 | Port | Purpose |
 |---|---|
-| `8443` | Agent gRPC endpoint (mTLS, HTTP/2 only) |
+| `4440` | Agent gRPC endpoint (mTLS, HTTP/2 only) — `4440` = orchestra concert pitch A440 |
 | `8080` | UI API + SPA (TLS, Connect protocol, or plain HTTP behind a reverse proxy) |
 | `9090` | Prometheus metrics (no auth, bind to loopback by default) |
 
-Both `8443` and `8080` can be merged into a single port by using a connection-level router
-(SNI or ALPN). Default config keeps them separate for simpler firewall rules.
+`4440` and `8080` can be merged onto a single external port (e.g. `443`) with a
+connection-level router (SNI passthrough for `4440`, TLS termination for `8080`). Default
+config keeps them separate for simpler firewall rules. See `docs/08-deployment.md`.

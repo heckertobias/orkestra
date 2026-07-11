@@ -2,6 +2,7 @@ package agentgw
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -218,10 +219,51 @@ func (h *Handler) handleAgentMessage(ctx context.Context, agentID string, msg *o
 		h.handleHello(ctx, agentID, p.Hello)
 	case *orkestraV1.AgentMessage_StatusReport:
 		h.handleStatusReport(ctx, agentID, p.StatusReport)
+	case *orkestraV1.AgentMessage_MetricsResponse:
+		if s := h.registry.Get(agentID); s != nil {
+			s.deliverResponse(msg)
+		}
 	case *orkestraV1.AgentMessage_Pong:
 		// heartbeat acknowledged
 	default:
 		slog.Debug("unhandled agent message type", "agent_id", agentID)
+	}
+}
+
+// ErrAgentNotConnected is returned when a request targets an agent that has no active session.
+var ErrAgentNotConnected = errors.New("agent not connected")
+
+// FetchAgentMetrics asks the connected agent for its current Prometheus metrics over the mTLS
+// stream and returns the exposition-format text. It blocks until the agent replies or ctx expires,
+// letting the Master federate per-agent metrics without any inbound port on the agent host.
+func (h *Handler) FetchAgentMetrics(ctx context.Context, agentID string) (string, error) {
+	s := h.registry.Get(agentID)
+	if s == nil {
+		return "", ErrAgentNotConnected
+	}
+	reqID := uuid.NewString()
+	ch := s.awaitResponse(reqID)
+	defer s.cancelResponse(reqID)
+
+	if !s.Send(&orkestraV1.MasterMessage{
+		RequestId: reqID,
+		Payload:   &orkestraV1.MasterMessage_MetricsRequest{MetricsRequest: &orkestraV1.MetricsRequest{}},
+	}) {
+		return "", errors.New("agent send queue full")
+	}
+
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case resp := <-ch:
+		mr := resp.GetMetricsResponse()
+		if mr == nil {
+			return "", errors.New("unexpected agent response")
+		}
+		if mr.Error != "" {
+			return "", fmt.Errorf("agent metrics error: %s", mr.Error)
+		}
+		return mr.PrometheusText, nil
 	}
 }
 

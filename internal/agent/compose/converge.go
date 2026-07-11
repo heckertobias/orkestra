@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"sort"
 
+	cerrdefs "github.com/containerd/errdefs"
 	composetypes "github.com/compose-spec/compose-go/v2/types"
 	"github.com/docker/docker/api/types/container"
 	imagetypes "github.com/docker/docker/api/types/image"
@@ -196,7 +197,7 @@ func ensureImage(ctx context.Context, dc *client.Client, ref, pullPolicy string)
 	if pullPolicy != composetypes.PullPolicyAlways {
 		// Only the presence check drives the "missing" policies; "always" pulls regardless.
 		if _, err := dc.ImageInspect(ctx, ref); err != nil {
-			if !client.IsErrNotFound(err) {
+			if !cerrdefs.IsNotFound(err) {
 				return fmt.Errorf("inspect image %s: %w", ref, err)
 			}
 			present = false
@@ -212,7 +213,7 @@ func ensureImage(ctx context.Context, dc *client.Client, ref, pullPolicy string)
 	if err != nil {
 		return fmt.Errorf("pull image %s: %w", ref, err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	// The pull only completes once the progress stream has been fully consumed.
 	if _, err := io.Copy(io.Discard, rc); err != nil {
 		return fmt.Errorf("pull image %s: %w", ref, err)

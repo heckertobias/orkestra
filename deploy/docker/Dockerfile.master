@@ -2,7 +2,7 @@ FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY orkestra-master /usr/local/bin/orkestra-master
 
-EXPOSE 8080 8443
+EXPOSE 8080 4440
 
 VOLUME ["/data"]
 

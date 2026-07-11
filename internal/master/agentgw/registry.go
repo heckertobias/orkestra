@@ -19,6 +19,9 @@ type Session struct {
 	Connected time.Time
 	send      chan *orkestraV1.MasterMessage
 	done      chan struct{}
+
+	mu      sync.Mutex
+	pending map[string]chan *orkestraV1.AgentMessage // request_id → response channel
 }
 
 // Send enqueues a message to be sent to the Agent. Non-blocking; drops if full.
@@ -29,6 +32,37 @@ func (s *Session) Send(msg *orkestraV1.MasterMessage) bool {
 	default:
 		return false
 	}
+}
+
+// awaitResponse registers a channel to receive the Agent's reply carrying requestID.
+func (s *Session) awaitResponse(requestID string) chan *orkestraV1.AgentMessage {
+	ch := make(chan *orkestraV1.AgentMessage, 1)
+	s.mu.Lock()
+	s.pending[requestID] = ch
+	s.mu.Unlock()
+	return ch
+}
+
+// cancelResponse drops a pending response registration (call via defer after awaitResponse).
+func (s *Session) cancelResponse(requestID string) {
+	s.mu.Lock()
+	delete(s.pending, requestID)
+	s.mu.Unlock()
+}
+
+// deliverResponse routes an Agent reply to a waiter registered under msg.RequestId, if any.
+func (s *Session) deliverResponse(msg *orkestraV1.AgentMessage) bool {
+	s.mu.Lock()
+	ch, ok := s.pending[msg.RequestId]
+	if ok {
+		delete(s.pending, msg.RequestId)
+	}
+	s.mu.Unlock()
+	if !ok {
+		return false
+	}
+	ch <- msg
+	return true
 }
 
 // Registry is a thread-safe map of agentID → active Session.
@@ -50,6 +84,7 @@ func (r *Registry) Register(agentID, serverID string) *Session {
 		Connected: time.Now(),
 		send:      make(chan *orkestraV1.MasterMessage, 64),
 		done:      make(chan struct{}),
+		pending:   make(map[string]chan *orkestraV1.AgentMessage),
 	}
 	r.mu.Lock()
 	r.sessions[agentID] = s

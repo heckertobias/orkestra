@@ -51,8 +51,36 @@ func runServe(args []string) {
 	slog.Info("orkestra agent starting", "version", version.Version, "data_dir", *dataDir)
 
 	if !enroll.IsEnrolled(*dataDir) {
-		slog.Error("agent not enrolled — run 'orkestra-agent enroll' first")
-		os.Exit(1)
+		// Container-friendly auto-enroll: the distroless image has no shell for an entrypoint
+		// script, so we enroll here on first boot when a master address + bootstrap token are
+		// supplied via env. Subsequent restarts reuse the persisted cert (no re-enroll).
+		masterAddr := os.Getenv("ORKESTRA_MASTER_ADDR")
+		bootstrapToken := os.Getenv("ORKESTRA_BOOTSTRAP_TOKEN")
+		if masterAddr == "" || bootstrapToken == "" {
+			slog.Error("agent not enrolled — run 'orkestra-agent enroll' first, " +
+				"or set ORKESTRA_MASTER_ADDR + ORKESTRA_BOOTSTRAP_TOKEN for auto-enroll")
+			os.Exit(1)
+		}
+
+		serverName := os.Getenv("ORKESTRA_AGENT_NAME")
+		if serverName == "" {
+			serverName, _ = os.Hostname()
+		}
+		slog.Info("agent not enrolled — auto-enrolling from environment", "master", masterAddr, "name", serverName)
+
+		enrollCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err := enroll.Run(enrollCtx, enroll.Params{
+			MasterAddr:     masterAddr,
+			BootstrapToken: bootstrapToken,
+			ServerName:     serverName,
+			DataDir:        *dataDir,
+		})
+		cancel()
+		if err != nil {
+			slog.Error("auto-enrollment failed", "err", err)
+			os.Exit(1)
+		}
+		slog.Info("auto-enrollment successful")
 	}
 
 	cfg, err := enroll.LoadConfig(*dataDir)
@@ -109,7 +137,7 @@ func runServe(args []string) {
 func runEnroll(args []string) {
 	fs := flag.NewFlagSet("enroll", flag.ExitOnError)
 	var (
-		masterAddr     = fs.String("master", "", "Master address, e.g. https://master.example.com:8443 (required)")
+		masterAddr     = fs.String("master", "", "Master address, e.g. https://master.example.com:4440 (required)")
 		bootstrapToken = fs.String("bootstrap-token", "", "Bootstrap token (required)")
 		name           = fs.String("name", "", "Human-readable server name (defaults to hostname)")
 		dataDir        = fs.String("data-dir", envOrDefault("ORKESTRA_AGENT_DATA", "/etc/orkestra/agent"), "Agent data directory")

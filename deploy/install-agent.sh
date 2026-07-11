@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # orkestra Agent installer
 # Usage: ./install-agent.sh \
-#   --master https://master.example.com:8443 \
+#   --master https://master.example.com:4440 \
 #   --bootstrap-token <token> \
 #   --name "web-server-01" \
 #   [--version latest] \

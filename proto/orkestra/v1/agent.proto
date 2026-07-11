@@ -34,8 +34,14 @@ message MasterMessage {
     StatsRequest      stats_request       = 4;
     CancelStream      cancel_stream       = 5;
     Ping              ping                = 6;
+    MetricsRequest    metrics_request     = 7;
   }
 }
+
+// Ask the Agent to gather its current Prometheus metrics. Correlated via MasterMessage.request_id;
+// the Agent replies with a MetricsResponse carrying the same request_id. Lets the Master federate
+// per-agent metrics over the existing outbound stream — no inbound port on the agent host.
+message MetricsRequest {}
 
 // Full desired state for this server (re-sent on reconnect).
 message ApplyDesiredState {
@@ -121,14 +127,21 @@ message AgentMessage {
   string request_id = 15;
 
   oneof payload {
-    Hello         hello          = 1;
-    StatusReport  status_report  = 2;
-    LogChunk      log_chunk      = 3;
-    StatsChunk    stats_chunk    = 4;
-    CommandResult command_result = 5;
-    DockerEvent   docker_event   = 6;
-    Pong          pong           = 7;
+    Hello           hello            = 1;
+    StatusReport    status_report    = 2;
+    LogChunk        log_chunk        = 3;
+    StatsChunk      stats_chunk      = 4;
+    CommandResult   command_result   = 5;
+    DockerEvent     docker_event     = 6;
+    Pong            pong             = 7;
+    MetricsResponse metrics_response = 8;
   }
+}
+
+// Prometheus exposition-format text for this agent, in response to a MetricsRequest.
+message MetricsResponse {
+  string prometheus_text = 1;
+  string error           = 2; // non-empty if the agent failed to gather metrics
 }
 
 // First message after Connect — identifies the agent and its host.

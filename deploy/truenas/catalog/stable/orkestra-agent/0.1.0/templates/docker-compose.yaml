@@ -1,0 +1,31 @@
+{#
+  orkestra Agent — self-contained compose template (no ix-lib helpers).
+  Values come from questions.yaml (user form) merged over ix_values.yaml (defaults).
+  The agent auto-enrolls on first boot from the env below, then reuses the stored cert.
+#}
+services:
+  orkestra-agent:
+    image: {{ values.image.repository }}:{{ values.image.tag }}
+    restart: unless-stopped
+    # Root — needed to reach the Docker socket (root:root on TrueNAS).
+    user: "0:0"
+    environment:
+      ORKESTRA_MASTER_ADDR: "{{ values.masterAddr }}"
+      ORKESTRA_BOOTSTRAP_TOKEN: "{{ values.bootstrapToken }}"
+      ORKESTRA_AGENT_DATA: "/var/lib/orkestra"
+      ORKESTRA_LOG_LEVEL: "{{ values.logLevel }}"
+{% if values.agentName %}
+      ORKESTRA_AGENT_NAME: "{{ values.agentName }}"
+{% endif %}
+    volumes:
+{% if values.storage.type == "host_path" %}
+      - "{{ values.storage.hostPath }}:/var/lib/orkestra"
+{% else %}
+      - "orkestra_agent_data:/var/lib/orkestra"
+{% endif %}
+      - "{{ values.dockerSocket }}:/var/run/docker.sock"
+
+{% if values.storage.type != "host_path" %}
+volumes:
+  orkestra_agent_data:
+{% endif %}

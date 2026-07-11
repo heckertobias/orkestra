@@ -68,7 +68,7 @@ cd deploy/docker && docker compose up -d
 
 # Agent (bare metal)
 curl -fsSL https://github.com/heckertobias/orkestra/releases/latest/download/install-agent.sh | \
-  bash -s -- --master https://master.example.com:8443 --bootstrap-token <token>
+  bash -s -- --master https://master.example.com:4440 --bootstrap-token <token>
 ```
 
 ### Configuration
@@ -77,7 +77,7 @@ curl -fsSL https://github.com/heckertobias/orkestra/releases/latest/download/ins
 |---|---|---|
 | `ORKESTRA_DATABASE_URL` | — | PostgreSQL DSN (required) |
 | `ORKESTRA_MASTER_KEY_FILE` | — | Path to 32-byte hex KEK file |
-| `ORKESTRA_AGENT_ADDR` | `0.0.0.0:8443` | Agent gRPC listener |
+| `ORKESTRA_AGENT_ADDR` | `0.0.0.0:4440` | Agent gRPC listener |
 | `ORKESTRA_UI_ADDR` | `0.0.0.0:8080` | Web UI + API listener |
 | `ORKESTRA_METRICS_ADDR` | `0.0.0.0:9090` | Prometheus metrics listener |
 | `ORKESTRA_LOG_LEVEL` | `info` | Log level: debug, info, warn, error |

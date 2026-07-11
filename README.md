@@ -79,7 +79,7 @@ docker compose -f deploy/docker/compose.yaml logs master | grep "setup"
 
 ```bash
 ./deploy/install-agent.sh \
-  --master https://master.example.com:8443 \
+  --master https://master.example.com:4440 \
   --bootstrap-token <token> \
   --name "web-server-01"
 ```

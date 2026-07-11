@@ -1,0 +1,93 @@
+groups:
+  - name: Master
+    description: How this agent reaches the orkestra Master
+  - name: Enrollment
+    description: One-time bootstrap (used once, then the stored certificate is reused)
+  - name: Storage
+    description: Persistent data — the enrollment certificate lives here
+  - name: Docker
+    description: Docker socket access
+  - name: Advanced
+    description: Optional settings
+
+questions:
+  # ---- Master ----
+  - variable: masterAddr
+    label: Master URL
+    group: Master
+    description: The orkestra Master's agent endpoint, e.g. https://orkestra.example.com:4440
+    schema:
+      type: string
+      required: true
+      default: "https://orkestra.example.com:4440"
+
+  - variable: agentName
+    label: Agent Name
+    group: Master
+    description: Human-readable name shown in the Master UI. Defaults to the container hostname if empty.
+    schema:
+      type: string
+      default: ""
+
+  # ---- Enrollment ----
+  - variable: bootstrapToken
+    label: Bootstrap Token
+    group: Enrollment
+    description: One-time enrollment token created in the Master UI. Only used on first boot.
+    schema:
+      type: string
+      required: true
+      private: true
+      default: ""
+
+  # ---- Storage ----
+  - variable: storage
+    label: Persistent Storage
+    group: Storage
+    description: Mounted at /var/lib/orkestra. Must survive restarts — losing it forces a re-enroll.
+    schema:
+      type: dict
+      attrs:
+        - variable: type
+          label: Type
+          schema:
+            type: string
+            default: ix_volume
+            enum:
+              - value: ix_volume
+                description: ixVolume (TrueNAS-managed dataset)
+              - value: host_path
+                description: Host Path (existing dataset)
+        - variable: hostPath
+          label: Host Path
+          schema:
+            type: hostpath
+            show_if: [["type", "=", "host_path"]]
+            required: true
+
+  # ---- Docker ----
+  - variable: dockerSocket
+    label: Docker Socket Host Path
+    group: Docker
+    description: The host's Docker socket. Default is correct for standard TrueNAS SCALE.
+    schema:
+      type: hostpath
+      required: true
+      default: /var/run/docker.sock
+
+  # ---- Advanced ----
+  - variable: logLevel
+    label: Log Level
+    group: Advanced
+    schema:
+      type: string
+      default: info
+      enum:
+        - value: debug
+          description: debug
+        - value: info
+          description: info
+        - value: warn
+          description: warn
+        - value: error
+          description: error

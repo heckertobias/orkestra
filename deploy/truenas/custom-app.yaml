@@ -1,0 +1,29 @@
+# orkestra Agent — TrueNAS "Custom App → Install via YAML" (fallback, always works)
+#
+# This is the guaranteed path: it works on any TrueNAS SCALE 24.10+ (Docker-based) without a
+# catalog. For the guided form with labeled fields, use the catalog app under ./catalog/ instead.
+#
+# Steps:
+#   1. In the orkestra Master UI, create an enrollment token and copy it.
+#   2. Create a dataset for persistence, e.g. /mnt/<pool>/apps/orkestra-agent.
+#   3. Fill in the three values below (master URL on :4440, token, dataset path).
+#   4. Apps → Discover Apps → Custom App → Install via YAML → paste this.
+#
+# The agent auto-enrolls on first boot (env-based) and reuses the stored cert on every restart.
+
+services:
+  orkestra-agent:
+    image: ghcr.io/heckertobias/orkestra-agent:latest
+    restart: unless-stopped
+    # Root is needed to reach the Docker socket (root:root on TrueNAS). If your socket is
+    # group-accessible, drop this and add `group_add: ["<docker-gid>"]` instead.
+    user: "0:0"
+    environment:
+      ORKESTRA_MASTER_ADDR: "https://orkestra.example.com:4440"   # <-- Master, agent port 4440
+      ORKESTRA_BOOTSTRAP_TOKEN: "<paste-enrollment-token>"        # <-- one-time token
+      ORKESTRA_AGENT_NAME: "truenas"                              # optional; defaults to hostname
+      ORKESTRA_AGENT_DATA: "/var/lib/orkestra"                    # cert/key live here — persist it
+      ORKESTRA_LOG_LEVEL: "info"
+    volumes:
+      - /mnt/<pool>/apps/orkestra-agent:/var/lib/orkestra         # <-- persistent dataset
+      - /var/run/docker.sock:/var/run/docker.sock
