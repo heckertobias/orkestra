@@ -297,9 +297,26 @@ func (h *Handler) handleStatusReport(ctx context.Context, agentID string, report
 	if err != nil {
 		slog.Error("update server from StatusReport", "agent_id", agentID, "err", err)
 	}
+
+	// Persist any agent-reported available updates (best-effort). Foundation only:
+	// this records "an update is available" per (server, layer); no apply logic here.
+	for _, u := range report.AvailableUpdates {
+		if _, err := h.q.UpsertAvailableUpdate(ctx, store.UpsertAvailableUpdateParams{
+			ServerID:         agentID,
+			Layer:            u.Layer,
+			CurrentVersion:   u.Current,
+			CandidateVersion: u.Candidate,
+			Detail:           []byte("{}"),
+			DetectedAt:       now,
+		}); err != nil {
+			slog.Error("persist available update", "agent_id", agentID, "layer", u.Layer, "err", err)
+		}
+	}
+
 	slog.Debug("status report received",
 		"agent_id", agentID,
 		"stacks", len(report.Stacks),
+		"available_updates", len(report.AvailableUpdates),
 	)
 }
 
