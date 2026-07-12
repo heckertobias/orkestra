@@ -288,6 +288,13 @@ func (h *Handler) handleHello(ctx context.Context, agentID string, hello *orkest
 	slog.Info("agent hello received", "agent_id", agentID, "hostname", hello.Hostname)
 }
 
+// IngestStatusReport applies a StatusReport as if it had arrived over the Connect
+// stream. It exists so integration tests can exercise the status-report persistence
+// path (including available_updates) without driving a full agent connection.
+func (h *Handler) IngestStatusReport(ctx context.Context, agentID string, report *orkestraV1.StatusReport) {
+	h.handleStatusReport(ctx, agentID, report)
+}
+
 func (h *Handler) handleStatusReport(ctx context.Context, agentID string, report *orkestraV1.StatusReport) {
 	now := time.Now().UnixMilli()
 	_, err := h.db.Exec(ctx,
