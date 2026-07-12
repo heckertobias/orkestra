@@ -158,8 +158,16 @@ message Hello {
 
 // Periodic heartbeat (every ~30 s) and response to reconcile results.
 message StatusReport {
-  repeated StackStatus stacks        = 1;
-  int64                reported_at_ms = 2;
+  repeated StackStatus     stacks            = 1;
+  int64                    reported_at_ms    = 2;
+  repeated AvailableUpdate available_updates = 3;
+}
+
+// An update the agent has detected as available for one layer. See docs/09-updates.md.
+message AvailableUpdate {
+  string layer     = 1; // 'orkestra' | 'images' | 'os'
+  string current   = 2; // current version / digest / package count
+  string candidate = 3; // target version / digest / "N packages"
 }
 
 message StackStatus {

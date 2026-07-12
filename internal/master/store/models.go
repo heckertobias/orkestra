@@ -46,6 +46,15 @@ type AuditLog struct {
 	Error      *string `json:"error"`
 }
 
+type AvailableUpdate struct {
+	ServerID         string `json:"server_id"`
+	Layer            string `json:"layer"`
+	CurrentVersion   string `json:"current_version"`
+	CandidateVersion string `json:"candidate_version"`
+	Detail           []byte `json:"detail"`
+	DetectedAt       int64  `json:"detected_at"`
+}
+
 type Ca struct {
 	ID        int32  `json:"id"`
 	CertPem   string `json:"cert_pem"`
@@ -225,6 +234,15 @@ type StackVersion struct {
 	SecretRefs  []byte  `json:"secret_refs"`
 	CreatedBy   *string `json:"created_by"`
 	CreatedAt   int64   `json:"created_at"`
+}
+
+type UpdatePolicy struct {
+	ServerID   *string `json:"server_id"`
+	Layer      string  `json:"layer"`
+	Mode       string  `json:"mode"`
+	WindowCron *string `json:"window_cron"`
+	AutoReboot bool    `json:"auto_reboot"`
+	UpdatedAt  int64   `json:"updated_at"`
 }
 
 type User struct {

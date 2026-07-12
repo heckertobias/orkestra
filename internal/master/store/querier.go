@@ -19,6 +19,7 @@ type Querier interface {
 	CountSecretBindings(ctx context.Context, secretID string) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) error
+	DeleteAvailableUpdate(ctx context.Context, arg DeleteAvailableUpdateParams) error
 	DeleteRoleBinding(ctx context.Context, id string) error
 	DeleteSecret(ctx context.Context, id string) error
 	DeleteUserByID(ctx context.Context, id string) error
@@ -65,6 +66,7 @@ type Querier interface {
 	ListAssignmentsForServer(ctx context.Context, serverID string) ([]ListAssignmentsForServerRow, error)
 	ListAssignmentsForStack(ctx context.Context, stackID string) ([]Assignment, error)
 	ListAuditLog(ctx context.Context, limit int32) ([]AuditLog, error)
+	ListAvailableUpdatesForServer(ctx context.Context, serverID string) ([]AvailableUpdate, error)
 	ListEnrollmentTokens(ctx context.Context) ([]EnrollmentToken, error)
 	ListEventsAfter(ctx context.Context, arg ListEventsAfterParams) ([]Event, error)
 	ListEventsFiltered(ctx context.Context, arg ListEventsFilteredParams) ([]Event, error)
@@ -74,9 +76,11 @@ type Querier interface {
 	ListServers(ctx context.Context) ([]Server, error)
 	ListStackVersions(ctx context.Context, stackID string) ([]StackVersion, error)
 	ListStacks(ctx context.Context) ([]Stack, error)
+	ListUpdatePolicies(ctx context.Context) ([]UpdatePolicy, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	MarkOfflineServers(ctx context.Context, lastSeenAt *int64) error
 	MarkPasswordResetTokenUsed(ctx context.Context, arg MarkPasswordResetTokenUsedParams) error
+	ResolveUpdatePolicy(ctx context.Context, arg ResolveUpdatePolicyParams) (UpdatePolicy, error)
 	RevokeAPIKey(ctx context.Context, id string) error
 	RevokeAllSessionsForUser(ctx context.Context, userID string) error
 	RevokeCertificate(ctx context.Context, arg RevokeCertificateParams) error
@@ -94,7 +98,10 @@ type Querier interface {
 	UpdateServer(ctx context.Context, arg UpdateServerParams) (Server, error)
 	UpdateServerStatus(ctx context.Context, arg UpdateServerStatusParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
+	UpsertAgentUpdatePolicy(ctx context.Context, arg UpsertAgentUpdatePolicyParams) (UpdatePolicy, error)
 	UpsertAssignment(ctx context.Context, arg UpsertAssignmentParams) (Assignment, error)
+	UpsertAvailableUpdate(ctx context.Context, arg UpsertAvailableUpdateParams) (AvailableUpdate, error)
+	UpsertFleetUpdatePolicy(ctx context.Context, arg UpsertFleetUpdatePolicyParams) (UpdatePolicy, error)
 	UpsertOIDCConfig(ctx context.Context, arg UpsertOIDCConfigParams) (OidcConfig, error)
 	UpsertPasswordPolicy(ctx context.Context, arg UpsertPasswordPolicyParams) (PasswordPolicy, error)
 	UpsertSMTPConfig(ctx context.Context, arg UpsertSMTPConfigParams) (SmtpConfig, error)
