@@ -83,14 +83,23 @@ docker compose -f deploy/docker/compose.yaml logs master | grep "setup"
 
 ### Agent
 
+Install from the package repository (Debian/Ubuntu shown; Fedora/RHEL via `dnf` — see
+[docs/08-deployment.md](docs/08-deployment.md#install-via-apt--dnf-packages)):
+
 ```bash
-./deploy/install-agent.sh \
-  --master https://master.example.com:4440 \
-  --bootstrap-token <token> \
-  --name "web-server-01"
+curl -fsSL https://heckertobias.github.io/orkestra/orkestra.gpg \
+  | sudo tee /usr/share/keyrings/orkestra.gpg >/dev/null
+echo "deb [signed-by=/usr/share/keyrings/orkestra.gpg] https://heckertobias.github.io/orkestra/apt stable main" \
+  | sudo tee /etc/apt/sources.list.d/orkestra.list
+sudo apt update && sudo apt install orkestra-agent
+
+# enroll once (get a token from the UI: Servers → Add Server), then start:
+sudo orkestra-agent enroll --master https://master.example.com:4440 --bootstrap-token <token> --name web-01
+sudo systemctl enable --now orkestra-agent
 ```
 
-The script downloads the agent binary, enrolls it (PKI/mTLS), installs and starts the systemd service.
+Updates are then just `sudo apt update && sudo apt upgrade`. The
+[`install-agent.sh`](deploy/install-agent.sh) script remains as a fallback for hosts without the repo.
 
 ## Development
 

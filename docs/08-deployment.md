@@ -83,6 +83,59 @@ Master's agent port `4440`.
 
 ---
 
+## Install via apt / dnf (packages)
+
+The recommended way to install on bare metal is the signed package repository — you get
+`apt install` / `dnf install` and, crucially, **`apt upgrade` / `dnf upgrade`** for updates instead
+of re-running a script. Packages are published for both `orkestra-master` and `orkestra-agent`
+(amd64 + arm64) and drop in the systemd unit, a default `/etc/orkestra/<tool>/env`, and a system
+user where needed.
+
+### Debian / Ubuntu (apt)
+
+```bash
+curl -fsSL https://heckertobias.github.io/orkestra/orkestra.gpg \
+  | sudo tee /usr/share/keyrings/orkestra.gpg >/dev/null
+echo "deb [signed-by=/usr/share/keyrings/orkestra.gpg] https://heckertobias.github.io/orkestra/apt stable main" \
+  | sudo tee /etc/apt/sources.list.d/orkestra.list
+sudo apt update
+sudo apt install orkestra-agent        # or: orkestra-master
+```
+
+### Fedora / RHEL / openSUSE (dnf)
+
+```bash
+sudo dnf config-manager --add-repo https://heckertobias.github.io/orkestra/rpm/orkestra.repo
+sudo dnf install orkestra-agent        # or: orkestra-master
+```
+
+### After install
+
+The package installs and `systemctl enable`s the service but does **not** start it — one config
+step remains:
+
+- **Agent:** enroll once, then start.
+  ```bash
+  sudo orkestra-agent enroll --master https://<master>:4440 --bootstrap-token <token> --name web-01
+  sudo systemctl enable --now orkestra-agent
+  ```
+  Get the token from the Master UI → **Servers → Add Server**.
+- **Master:** set `ORKESTRA_DATABASE_URL` and create the KEK in `/etc/orkestra/master/env`
+  (see the comments in that file), then `sudo systemctl enable --now orkestra-master`. For most
+  setups, running the Master via Docker/Compose (below) is simpler because it bundles Postgres.
+
+### Updating
+
+```bash
+sudo apt update && sudo apt upgrade     # Debian/Ubuntu
+sudo dnf upgrade                        # Fedora/RHEL
+```
+
+> The older `install-agent.sh` (below) remains as a fallback for hosts without the package repo, but
+> it does not self-update — prefer the package manager where possible.
+
+---
+
 ## Deployment: Master
 
 ### Option A — Docker Compose (Recommended for self-hosting)

@@ -28,6 +28,11 @@ The Master is the control point; agents connect outbound only (see `docs/02-prot
 update commands ride the existing mTLS stream and all "what's available" data is agent-reported —
 the same pattern used for [federated metrics](docs/08-deployment.md#federated-agent-metrics).
 
+> **Note:** the **orkestra-binary** layer is now largely covered for **systemd hosts** by the
+> apt/dnf packages (see §7) — `apt upgrade` / `dnf upgrade` updates the binary. The fleet-update
+> binary layer is therefore mainly needed for **container agents** (TrueNAS/Docker) and for
+> *orchestrating* updates centrally from the UI; plain package-manager updates work today.
+
 ```mermaid
 flowchart LR
   subgraph Agent
@@ -201,3 +206,17 @@ The KEK is loaded via a pluggable `KeySource` (`internal/master/keys/`). Impleme
   or an unseal endpoint. Nothing persisted. Breaks unattended restart.
 - 🔲 **`kms`** (`ORKESTRA_KEY_SOURCE=kms`) — KEK is wrapped by an external KMS (OpenBao Transit or a
   cloud KMS) and unwrapped at boot via API. No plaintext at rest; unattended restart works.
+
+---
+
+## 7. Packaging & distribution
+
+- ✅ **apt/dnf packages** — `.deb` + `.rpm` for `orkestra-master` and `orkestra-agent` (amd64/arm64)
+  built by goreleaser/nfpm, published to a GPG-signed GitHub Pages repo
+  (`https://heckertobias.github.io/orkestra/{apt,rpm}`). `apt install` / `dnf install` +
+  `apt upgrade` / `dnf upgrade`. Config in `.goreleaser.yaml`, `deploy/packaging/`,
+  `.github/workflows/release.yml`.
+- 🔲 **Container-agent self-update** — surfaced/orchestrated via the update system (§1); packages
+  don't cover container agents.
+- 💡 **More channels** — Homebrew tap, Alpine `.apk`, Arch AUR, if demand appears.
+- 💡 **Reproducible/attested builds** — SLSA provenance / cosign signing of release artifacts.

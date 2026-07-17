@@ -1,0 +1,16 @@
+# orkestra Master configuration — installed at /etc/orkestra/master/env
+# Edit and then: sudo systemctl restart orkestra-master
+#
+# REQUIRED before first start:
+#   - ORKESTRA_DATABASE_URL   (a reachable PostgreSQL instance)
+#   - a KEK file at ORKESTRA_MASTER_KEY_FILE (32-byte hex, chmod 600), e.g.:
+#       openssl rand -hex 32 | sudo tee /etc/orkestra/master/master.key >/dev/null
+#       sudo chmod 600 /etc/orkestra/master/master.key
+# The KEK must live in a different trust domain than the DB credentials.
+
+ORKESTRA_DATABASE_URL=
+ORKESTRA_MASTER_KEY_FILE=/etc/orkestra/master/master.key
+ORKESTRA_AGENT_ADDR=0.0.0.0:4440
+ORKESTRA_UI_ADDR=0.0.0.0:8080
+ORKESTRA_METRICS_ADDR=127.0.0.1:9090
+ORKESTRA_LOG_LEVEL=info

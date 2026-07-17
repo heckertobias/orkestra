@@ -41,7 +41,7 @@ archives:
   - id: master-archive
     ids: [orkestra-master]
     name_template: "orkestra-master_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    format: tar.gz
+    formats: [tar.gz]
     files:
       - deploy/systemd/orkestra-master.service
       - deploy/docker/compose.yaml
@@ -51,11 +51,66 @@ archives:
   - id: agent-archive
     ids: [orkestra-agent]
     name_template: "orkestra-agent_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    format: tar.gz
+    formats: [tar.gz]
     files:
       - deploy/systemd/orkestra-agent.service
       - deploy/install-agent.sh
       - CHANGELOG.md
+
+nfpms:
+  - id: orkestra-master-pkg
+    package_name: orkestra-master
+    ids: [orkestra-master]
+    file_name_template: "{{ .ConventionalFileName }}"
+    vendor: orkestra
+    homepage: https://github.com/heckertobias/orkestra
+    maintainer: Tobias Hecker <heckertobias@googlemail.com>
+    description: |
+      orkestra Master — control plane for centrally managed, self-healing
+      Docker Compose stacks across Linux servers.
+    license: MIT
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    contents:
+      - src: deploy/systemd/orkestra-master.service
+        dst: /lib/systemd/system/orkestra-master.service
+      - src: deploy/packaging/master/env
+        dst: /etc/orkestra/master/env
+        type: "config|noreplace"
+        file_info:
+          mode: 0640
+    scripts:
+      postinstall: deploy/packaging/master/postinstall.sh
+      preremove: deploy/packaging/master/preremove.sh
+      postremove: deploy/packaging/master/postremove.sh
+
+  - id: orkestra-agent-pkg
+    package_name: orkestra-agent
+    ids: [orkestra-agent]
+    file_name_template: "{{ .ConventionalFileName }}"
+    vendor: orkestra
+    homepage: https://github.com/heckertobias/orkestra
+    maintainer: Tobias Hecker <heckertobias@googlemail.com>
+    description: |
+      orkestra Agent — reconciles Docker Compose stacks on a host toward the
+      Master's desired state over an outbound mTLS gRPC stream.
+    license: MIT
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    recommends:
+      - docker.io
+    contents:
+      - src: deploy/systemd/orkestra-agent.service
+        dst: /lib/systemd/system/orkestra-agent.service
+      - src: deploy/packaging/agent/env
+        dst: /etc/orkestra/agent/env
+        type: "config|noreplace"
+        file_info:
+          mode: 0600
+    scripts:
+      postinstall: deploy/packaging/agent/postinstall.sh
+      preremove: deploy/packaging/agent/preremove.sh
+      postremove: deploy/packaging/agent/postremove.sh
 
 dockers:
   - id: master-amd64

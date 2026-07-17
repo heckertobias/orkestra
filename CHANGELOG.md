@@ -23,6 +23,11 @@ Work landed on `main` after the `v0.1.0` tag. See [ROADMAP.md](ROADMAP.md) for w
   [ROADMAP.md](ROADMAP.md#1-update-system-fleet-updates).
 - **Dev harness:** `run-dev.sh` (Postgres + Master + Vite, auto admin/token, optional DinD agents)
   and a `run-dev` skill.
+- **apt/dnf packages:** `.deb` + `.rpm` for `orkestra-master` and `orkestra-agent` (amd64/arm64)
+  via goreleaser/nfpm, published to a GPG-signed GitHub Pages repository. Install and update with
+  `apt install`/`apt upgrade` or `dnf install`/`dnf upgrade`; `install-agent.sh` stays as a fallback.
+- **Web:** the "Add Server" button now opens an enrollment dialog (mint token + copy the
+  `orkestra-agent enroll` command) — a browser-only agent connect.
 
 ## [v0.1.0] — 2026-06-07
 

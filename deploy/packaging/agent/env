@@ -1,0 +1,9 @@
+# orkestra Agent configuration — installed at /etc/orkestra/agent/env
+# Edit and then: sudo systemctl restart orkestra-agent
+#
+# The master address and agent identity are written by `orkestra-agent enroll`
+# into the data dir below; ORKESTRA_MASTER_ADDR here is optional/override.
+
+#ORKESTRA_MASTER_ADDR=https://master.example.com:4440
+ORKESTRA_AGENT_DATA=/etc/orkestra/agent
+ORKESTRA_LOG_LEVEL=info

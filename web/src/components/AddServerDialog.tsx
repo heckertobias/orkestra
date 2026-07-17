@@ -178,9 +178,10 @@ export function AddServerDialog({ onClose }: AddServerDialogProps) {
                   </button>
                 </div>
                 <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
-                  Install the agent binary first (see the deployment docs), then start it with
-                  <code className="mx-1 font-mono" style={{ color: 'var(--text)' }}>orkestra-agent serve</code>
-                  or the systemd unit. The server appears here as <span style={{ color: 'var(--accent)' }}>Online</span> once connected.
+                  Install the agent first — <code className="mx-1 font-mono" style={{ color: 'var(--text)' }}>apt install orkestra-agent</code>
+                  (or <code className="mx-1 font-mono" style={{ color: 'var(--text)' }}>dnf install</code>; see the deployment docs) — then run the command above and
+                  <code className="mx-1 font-mono" style={{ color: 'var(--text)' }}>sudo systemctl enable --now orkestra-agent</code>.
+                  The server appears here as <span style={{ color: 'var(--accent)' }}>Online</span> once connected.
                 </p>
               </div>
             </div>

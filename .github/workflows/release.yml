@@ -46,3 +46,111 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Build a signed apt + rpm repository from the release's .deb/.rpm assets and
+  # publish it to GitHub Pages (gh-pages branch). Requires two repo secrets:
+  #   GPG_PRIVATE_KEY  — ASCII-armored private signing key
+  #   GPG_PASSPHRASE   — its passphrase (empty string if the key has none)
+  # One-time: enable Pages on the gh-pages branch in the repo settings.
+  pages-repo:
+    name: publish apt/rpm repo
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install repo tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y reprepro createrepo-c
+
+      - name: Import GPG signing key
+        id: gpg
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Check out existing gh-pages (accumulate old versions)
+        uses: actions/checkout@v7
+        continue-on-error: true
+        with:
+          ref: gh-pages
+          path: site
+
+      - name: Download release packages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p dist-pkgs
+          gh release download "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern '*.deb' --pattern '*.rpm' \
+            --dir dist-pkgs
+          ls -la dist-pkgs
+
+      - name: Build signed apt repository (reprepro)
+        env:
+          KEYID: ${{ steps.gpg.outputs.keyid }}
+        run: |
+          mkdir -p site/apt/conf
+          cat > site/apt/conf/distributions <<EOF
+          Origin: orkestra
+          Label: orkestra
+          Suite: stable
+          Codename: stable
+          Architectures: amd64 arm64
+          Components: main
+          Description: orkestra apt repository
+          SignWith: ${KEYID}
+          EOF
+          for deb in dist-pkgs/*.deb; do
+            reprepro -b site/apt includedeb stable "$deb" || true
+          done
+
+      - name: Build signed rpm repository (createrepo_c)
+        env:
+          KEYID: ${{ steps.gpg.outputs.keyid }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          mkdir -p site/rpm/packages
+          cp -f dist-pkgs/*.rpm site/rpm/packages/ 2>/dev/null || true
+          createrepo_c --update site/rpm
+          gpg --batch --yes --pinentry-mode loopback --passphrase "${GPG_PASSPHRASE}" \
+              --detach-sign --armor site/rpm/repodata/repomd.xml
+          # Packages are not individually GPG-signed; trust comes from the signed
+          # repo metadata (repomd.xml.asc) → repo_gpgcheck=1, gpgcheck=0.
+          cat > site/rpm/orkestra.repo <<'EOF'
+          [orkestra]
+          name=orkestra
+          baseurl=https://heckertobias.github.io/orkestra/rpm
+          enabled=1
+          gpgcheck=0
+          repo_gpgcheck=1
+          gpgkey=https://heckertobias.github.io/orkestra/orkestra.gpg
+          EOF
+
+      - name: Assemble Pages site (public key, index, .nojekyll)
+        env:
+          KEYID: ${{ steps.gpg.outputs.keyid }}
+        run: |
+          gpg --armor --export "${KEYID}" > site/orkestra.gpg
+          touch site/.nojekyll
+          cat > site/index.html <<'EOF'
+          <!doctype html><meta charset="utf-8"><title>orkestra package repository</title>
+          <body style="font-family:system-ui;max-width:52rem;margin:3rem auto;padding:0 1rem;line-height:1.5">
+          <h1>orkestra package repository</h1>
+          <h2>Debian / Ubuntu (apt)</h2>
+          <pre>curl -fsSL https://heckertobias.github.io/orkestra/orkestra.gpg | sudo tee /usr/share/keyrings/orkestra.gpg >/dev/null
+          echo "deb [signed-by=/usr/share/keyrings/orkestra.gpg] https://heckertobias.github.io/orkestra/apt stable main" | sudo tee /etc/apt/sources.list.d/orkestra.list
+          sudo apt update &amp;&amp; sudo apt install orkestra-agent   # or orkestra-master</pre>
+          <h2>Fedora / RHEL (dnf)</h2>
+          <pre>sudo dnf config-manager --add-repo https://heckertobias.github.io/orkestra/rpm/orkestra.repo
+          sudo dnf install orkestra-agent   # or orkestra-master</pre>
+          </body>
+          EOF
+
+      - name: Publish to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          publish_branch: gh-pages

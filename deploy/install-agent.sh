@@ -16,7 +16,7 @@ TOKEN=""
 NAME=""
 VERSION="latest"
 DATA_DIR="/etc/orkestra/agent"
-BINARY_PATH="/usr/local/bin/orkestra-agent"
+BINARY_PATH="/usr/bin/orkestra-agent"
 GITHUB_REPO="heckertobias/orkestra"
 
 # ─── Parse args ───────────────────────────────────────────────────────────────

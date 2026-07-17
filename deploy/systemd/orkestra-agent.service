@@ -9,7 +9,7 @@ Type=simple
 # The agent needs Docker socket access. Add the 'docker' group to SupplementaryGroups
 # if running as a non-root user whose primary group cannot access the socket.
 User=root
-ExecStart=/usr/local/bin/orkestra-agent serve
+ExecStart=/usr/bin/orkestra-agent serve
 EnvironmentFile=-/etc/orkestra/agent/env
 Restart=on-failure
 RestartSec=10s
