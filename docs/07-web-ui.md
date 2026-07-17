@@ -29,24 +29,7 @@ the orchestra. This plays on the name "orkestra" — the orc conducts, the conta
 
 Sidebar-based navigation (dark, fixed left) with a main content area — matching the reference:
 
-```mermaid
-flowchart LR
-  subgraph Sidebar["Sidebar (fixed left)"]
-    direction TB
-    N1["● Dashboard"]
-    N2["○ Servers"]
-    N3["○ Stacks"]
-    N1 ~~~ N2 ~~~ N3
-  end
-  subgraph Main["Main area"]
-    direction TB
-    H["Page Header&nbsp;&nbsp;·&nbsp;&nbsp;search / user"]
-    C["Main content<br/>(table / detail / editor)"]
-    S["Stats / system overview panel"]
-    H ~~~ C ~~~ S
-  end
-  Sidebar ~~~ Main
-```
+![orkestra UI layout: fixed left sidebar (Dashboard active) with a main area holding the page header, content table, and a system-overview panel](assets/ui-layout.svg)
 
 Key UI details from the reference:
 - Status dots (● Online, ○ Offline) in the server/endpoint table

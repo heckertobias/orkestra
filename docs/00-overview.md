@@ -28,23 +28,24 @@ flowchart TB
     STORE[("Store (Postgres)<br/>+ CA / PKI")]
     SEC["Secret store<br/>(built-in; OpenBao planned)"]
     API <--> REC
-    GW --- STORE
     REC --- STORE
+    GW --- STORE
     STORE --- SEC
   end
 
-  Browser -- HTTPS --> API
-
-  subgraph AgentA["AGENT — Server A"]
-    RA["reconcile loop<br/>Docker SDK + compose-go"]
+  subgraph Agent["AGENT (one per server)"]
+    direction TB
+    RL["reconcile loop<br/>Docker SDK + compose-go"]
     SOCK["/var/run/docker.sock"]
-    RA --> SOCK
+    RL --> SOCK
   end
-  AgentB["AGENT — Server B"]
-  AgentC["AGENT — Server C"]
 
-  RA & AgentB & AgentC -. "mTLS / gRPC bidi-stream<br/>(agent connects outbound)" .-> GW
+  Browser -- HTTPS --> API
+  RL -. "mTLS / gRPC bidi-stream<br/>(agent connects outbound)" .-> GW
 ```
+
+> A single Agent's internals are shown; a real fleet has many agents, each dialling the Master
+> outbound (see the fan-out diagram in the [README](../README.md)).
 
 ## Core Principles
 
