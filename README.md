@@ -10,28 +10,34 @@ Plain "SSH + docker compose" is not centrally controllable, not self-healing, an
 - A central **Master** holds Desired State in PostgreSQL, distributes it to Agents, and exposes a **Web UI**.
 - Agents connect **outbound** to the Master — NAT and firewall friendly, authenticated via **mTLS**.
 
+> **Status:** the core loop — enroll an agent, define a Compose stack, assign it, and have the agent
+> pull images and run/heal containers — works end-to-end. Some features are still in progress (live
+> logs/stats/exec, named networks/volumes, secret injection, fleet updates). See
+> [ROADMAP.md](ROADMAP.md) for what's planned and what's partial.
+
 ## Architecture
 
-```
-                     ┌──────────────────────────────────────────┐
-                     │                 MASTER                    │
- Browser  ── HTTPS ─▶│  ┌────────────┐   ┌──────────────────┐   │
- (React SPA)         │  │  HTTP/API  │   │   Reconciler /   │   │
-                     │  │ (Connect)  │◀─▶│   Scheduler      │   │
-                     │  └────────────┘   └──────────────────┘   │
-                     │  ┌────────────┐   ┌──────────────────┐   │
-                     │  │ Agent-gRPC │   │ Store (Postgres) │   │
-                     │  │  Endpoint  │   │  + CA / PKI      │   │
-                     │  └─────┬──────┘   └──────────────────┘   │
-                     └────────┼─────────────────────────────────┘
-          mTLS / gRPC bidi-stream │  (Agent connects outbound)
-            ┌──────────────┬──────┴───────┬──────────────┐
-            ▼              ▼              ▼              ▼
-      ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐
-      │  AGENT   │   │  AGENT   │   │  AGENT   │   │  AGENT   │
-      │ Server A │   │ Server B │   │ Server C │   │ Server D │
-      │ Docker   │   │ Docker   │   │ Docker   │   │ Docker   │
-      └──────────┘   └──────────┘   └──────────┘   └──────────┘
+```mermaid
+flowchart TB
+  Browser["Browser<br/>(React SPA)"]
+
+  subgraph Master["MASTER"]
+    direction LR
+    API["HTTP / API<br/>(Connect)"]
+    REC["Reconciler /<br/>Scheduler"]
+    GW["Agent-gRPC<br/>endpoint"]
+    STORE[("Store (Postgres)<br/>+ CA / PKI")]
+    API <--> REC
+    GW --- STORE
+  end
+
+  Browser -- HTTPS --> API
+
+  A["AGENT<br/>Server A<br/>Docker"]
+  B["AGENT<br/>Server B<br/>Docker"]
+  C["AGENT<br/>Server C<br/>Docker"]
+
+  A & B & C -. "mTLS / gRPC bidi-stream<br/>(agent connects outbound)" .-> GW
 ```
 
 ## Core Principles
@@ -49,7 +55,7 @@ Plain "SSH + docker compose" is not centrally controllable, not self-healing, an
 | Docker control | Docker Engine SDK + compose-go |
 | Persistence | PostgreSQL + sqlc (pgx/v5) + goose migrations |
 | Auth | argon2id (local) + OIDC (optional) |
-| Secrets | Built-in (age/NaCl) or OpenBao (Vault-compatible) |
+| Secrets | Built-in encrypted store (XChaCha20-Poly1305 + KEK); OpenBao backend planned |
 | Frontend | React + TypeScript + Vite + Tailwind + TanStack Query |
 | Packaging | goreleaser — single binary, systemd units, Docker image |
 
@@ -131,21 +137,6 @@ make web      # npm run build in web/
 /tmp/orkestra-vite.log
 ```
 
-## Project Status
-
-See [docs/09-roadmap.md](docs/09-roadmap.md) for the full implementation roadmap.
-
-| Milestone | Description | Status |
-|---|---|---|
-| M0 | Repo scaffolding & tooling | ✅ Complete |
-| M1 | PKI, enrollment, persistent mTLS connection | ✅ Complete |
-| M2 | Container control & minimal Web UI | ✅ Complete |
-| M3 | Compose stacks & desired-state reconciliation | ✅ Complete |
-| M4 | Secrets (built-in + OpenBao) | ✅ Complete |
-| M5 | User auth, sessions & RBAC | ✅ Complete |
-| M6 | OIDC, metrics, event feed & polish | ✅ Complete |
-| M7 | Hardening, packaging & v0.1.0 release | 🔧 In progress |
-
 ## Documentation
 
 - [docs/00-overview.md](docs/00-overview.md) — Architecture overview
@@ -153,11 +144,11 @@ See [docs/09-roadmap.md](docs/09-roadmap.md) for the full implementation roadmap
 - [docs/02-protocol.md](docs/02-protocol.md) — gRPC/Connect protocol
 - [docs/03-data-model.md](docs/03-data-model.md) — PostgreSQL schema
 - [docs/04-reconciliation.md](docs/04-reconciliation.md) — Desired-State model & Converge Engine
-- [docs/05-secrets.md](docs/05-secrets.md) — SecretProvider, built-in, OpenBao
+- [docs/05-secrets.md](docs/05-secrets.md) — Built-in secret store, CRUD, reveal, audit
 - [docs/06-security-auth.md](docs/06-security-auth.md) — PKI/mTLS, user auth, RBAC, audit
 - [docs/07-web-ui.md](docs/07-web-ui.md) — UI pages & frontend stack
 - [docs/08-deployment.md](docs/08-deployment.md) — Observability & deployment
-- [docs/09-roadmap.md](docs/09-roadmap.md) — Implementation milestones
+- [ROADMAP.md](ROADMAP.md) — Planned features, partial foundations & known gaps
 
 ## License
 

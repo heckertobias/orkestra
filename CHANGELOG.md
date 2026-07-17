@@ -2,6 +2,28 @@
 
 All notable changes to orkestra are documented here.
 
+## [Unreleased]
+
+Work landed on `main` after the `v0.1.0` tag. See [ROADMAP.md](ROADMAP.md) for what is still open.
+
+- **M8 — RBAC depth:** per-server / per-stack role bindings, a dedicated `secrets-manager` role,
+  and a permissions-matrix UI.
+- **Auth / SSO / self-service wave:** per-user SSO-only flag, RP-initiated (real) SSO logout with a
+  choice page, last-local-admin invariant guards, admin set-password links, email (SMTP) flows via
+  Mailpit in the dev harness.
+- **Stack editor:** full-featured compose editor with whitelist-based field validation and line
+  numbers, compose-aware highlighting, and declarative env vars resolved at deploy time.
+- **Agent:** image pull in the converge engine honouring the compose `pull_policy`; end-to-end
+  enrollment; isolated Docker-in-Docker agents in the dev harness.
+- **M7 hardening (second pass):** agent gRPC port `4440`, TrueNAS container agent (custom app +
+  catalog train), federated agent metrics through the Master.
+- **Updates (foundation only):** `update_policies` / `available_updates` schema + queries, the
+  `StatusReport.available_updates` wire format, and master-side persistence. Agent detection, apply
+  RPCs, browser API and UI are **not** implemented yet — see
+  [ROADMAP.md](ROADMAP.md#1-update-system-fleet-updates).
+- **Dev harness:** `run-dev.sh` (Postgres + Master + Vite, auto admin/token, optional DinD agents)
+  and a `run-dev` skill.
+
 ## [v0.1.0] — 2026-06-07
 
 Initial release. orkestra is a lightweight Master/Agent orchestrator for Docker Compose stacks across Linux servers.
@@ -21,12 +43,16 @@ Initial release. orkestra is a lightweight Master/Agent orchestrator for Docker 
 
 **M2 — Container Control & Web UI**
 - Agent-side Docker control: list, start, stop, restart, remove, image pull
-- Log streaming and stats streaming bridged to browser
+- Log/stats streaming wire format + Master↔Agent bridge scaffolding (not yet wired end-to-end —
+  see [ROADMAP.md](ROADMAP.md#3-live-streaming--logs-stats-exec))
 - React/TypeScript/Vite SPA, dark theme with lime-green accent, Server List and Server Detail pages
 
 **M3 — Compose Stacks & Desired-State Reconciliation**
 - Full stack CRUD with versioned `stack_versions` and `assignments`
-- Compose Converge Engine: spec-hash–based container identity, create/recreate/remove, networks, volumes
+- Compose Converge Engine: spec-hash–based container identity, create/recreate/remove for a Compose
+  subset (image, command, env, ports, restart, bind mounts, …). Named networks/volumes, `depends_on`
+  ordering and healthchecks are not yet applied — see
+  [ROADMAP.md](ROADMAP.md#2-converge-engine--compose-coverage)
 - Master reconciler pushes `ApplyDesiredState` to connected agents every 15s (and on mutations)
 - Stacks List and Stack Detail pages with version history and YAML viewer
 

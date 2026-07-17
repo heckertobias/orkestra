@@ -150,7 +150,8 @@ otherwise the IdP ends the session but will not redirect the browser back.
 
 All mutating API requests (non-GET Connect RPCs) require a `X-CSRF-Token` header containing a
 CSRF token derived from the session. The browser SPA includes it automatically. Pure API clients
-(non-browser) use API keys instead of session cookies (to be implemented in M5).
+(non-browser) authenticate with an **API key** (a `Bearer` token, stored SHA-256-hashed) instead
+of a session cookie, which sidesteps CSRF entirely.
 
 ---
 

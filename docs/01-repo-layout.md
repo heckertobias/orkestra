@@ -20,10 +20,10 @@ orkestra/
 │   │   ├── api/                 # Connect handlers for the UI API
 │   │   ├── reconciler/          # Desired-State diff → commands to Agents
 │   │   ├── store/               # PostgreSQL (sqlc-generated, pgx/v5) + repositories
-│   │   ├── keys/                # KeySource abstraction — loads KEK at startup (file/env/kms)
+│   │   ├── keys/                # KeySource abstraction — loads KEK at startup (file/env; kms planned)
 │   │   ├── pki/                 # Internal CA, cert issuance, bootstrap tokens
 │   │   ├── auth/                # Sessions, local users, OIDC, RBAC middleware
-│   │   ├── secrets/             # SecretProvider interface + builtin + openbao
+│   │   ├── secrets/             # Built-in secret sealing (KEK); OpenBao backend planned
 │   │   └── audit/               # Audit log writer
 │   ├── agent/
 │   │   ├── conn/                # gRPC client, reconnect/backoff, mTLS
@@ -31,8 +31,8 @@ orkestra/
 │   │   ├── dockerctl/           # Docker SDK wrapper (containers, images, networks, volumes)
 │   │   ├── compose/             # compose-go loader + Converge Engine
 │   │   ├── reconcile/           # Local reconcile loop against Desired State
-│   │   ├── secrets/             # Secret materialization (tmpfs / Docker secret / env)
-│   │   └── telemetry/           # Status / log / stats reporter
+│   │   ├── secrets/             # Secret materialization (tmpfs / Docker secret / env) — planned
+│   │   └── telemetry/           # Status reporter (log/stats streaming not yet wired)
 │   └── shared/
 │       ├── gen/                 # Generated protobuf code (Go)
 │       └── version/             # Build-time version info
@@ -77,8 +77,8 @@ Implements the **Converge Engine** — the most complex package. See
 
 ### `internal/master/secrets`
 
-Houses the `SecretProvider` interface and both implementations (`builtin`, `openbao`).
-See [05-secrets.md](05-secrets.md).
+Houses the built-in secret sealing helpers (`Seal`/`Open`, XChaCha20-Poly1305 + KEK). The OpenBao
+backend is planned. See [05-secrets.md](05-secrets.md) and [ROADMAP.md](../ROADMAP.md).
 
 ---
 

@@ -78,6 +78,18 @@ serves on `localhost:5173` and the Master (built with `-tags dev`) proxies reque
 
 ## Pages & Features
 
+> **Implementation status.** The pages below describe the intended UI. Most are built and wired
+> (Login, Dashboard, Servers, Server Detail, Stacks, Stack Editor, Secrets, Users & Roles, Audit
+> Log, Settings, Profile). A few described features are **not yet functional** and are tracked in
+> [ROADMAP.md](../ROADMAP.md):
+> - **Add-Server / enrollment-token dialog** — the button exists but has no handler; mint tokens via
+>   the API/CLI for now ([ROADMAP §5](../ROADMAP.md#5-web-ui-gaps)).
+> - **Live Logs drawer, Live Stats charts, container exec/terminal** — depend on the streaming
+>   pipeline ([ROADMAP §3](../ROADMAP.md#3-live-streaming--logs-stats-exec)).
+> - **Secret bindings tab & OpenBao secret option / migration** — depend on secret distribution and
+>   the OpenBao backend ([ROADMAP §4](../ROADMAP.md#4-secrets--distribution-materialization--openbao)).
+> - **Updates page** — depends on the update system ([ROADMAP §1](../ROADMAP.md#1-update-system-fleet-updates)).
+
 ### 1. Dashboard (`/`)
 
 **Purpose:** Bird's-eye view of the fleet.

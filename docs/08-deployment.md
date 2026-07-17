@@ -262,7 +262,7 @@ The Master and an Agent can run on the same host without conflict:
 - **Caution:** a co-located agent controls the host's Docker daemon. If you assign it a stack
   that includes the Master's own containers, the agent could recreate/stop the Master. Keep the
   Master's stack off the co-located agent until fleet-managed self-updates land (see
-  `docs/09-updates.md`).
+  [ROADMAP.md](../ROADMAP.md#1-update-system-fleet-updates)).
 
 ---
 

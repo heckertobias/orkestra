@@ -10,6 +10,12 @@ protobuf-first and natively speaks three protocols over HTTP/2:
 
 One protobuf schema, one Go server, both clients happy.
 
+> **Implementation status.** The message schema below is the full protocol surface. Enrollment,
+> the persistent `Connect` stream, `ApplyDesiredState`, heartbeats, and cert renewal are wired
+> end-to-end. The **live-stream** paths (`StreamLogs`/`StreamStats`, `ExecOnContainer`/`ExecCommand`)
+> and **pre-resolved secrets** (`ResolvedSecret`) exist as wire format but are **not yet wired
+> end-to-end** — see [ROADMAP.md](../ROADMAP.md).
+
 ---
 
 ## Connection Lifecycle
@@ -18,19 +24,14 @@ One protobuf schema, one Go server, both clients happy.
 
 Before an Agent can connect, it must be enrolled. This happens once per server.
 
-```
-Agent                                          Master
-  │                                              │
-  │── EnrollRequest ────────────────────────────▶│
-  │   {bootstrap_token, csr (PEM), node_info}    │
-  │                                              │  validate token
-  │                                              │  sign CSR with internal CA
-  │                                              │  persist server record
-  │◀── EnrollResponse ───────────────────────────│
-  │    {client_cert (PEM), ca_bundle, agent_id}  │
-  │                                              │
-  │  Agent persists cert+key to                  │
-  │  /etc/orkestra/agent/{cert,key}.pem         │
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant Master
+    Agent->>Master: EnrollRequest<br/>{bootstrap_token, csr (PEM), node_info}
+    Note over Master: validate token<br/>sign CSR with internal CA<br/>persist server record
+    Master-->>Agent: EnrollResponse<br/>{client_cert (PEM), ca_bundle, agent_id}
+    Note over Agent: persist cert+key to<br/>/etc/orkestra/agent/{cert,key}.pem
 ```
 
 The `bootstrap_token` is a short-lived, use-limited token created by an operator in the UI.
@@ -41,27 +42,22 @@ server.
 
 After enrollment, the Agent opens a persistent bidi-stream authenticated with mTLS:
 
-```
-Agent                                          Master
-  │── TLS ClientHello (client cert = agent cert) ▶│
-  │◀── TLS ServerHello (server cert) ─────────────│
-  │  [mTLS handshake — Master verifies agent cert  │
-  │   against internal CA; checks revocation list] │
-  │                                                │
-  │── AgentMessage{Hello} ───────────────────────▶│
-  │   {agent_id, version, docker_version,          │
-  │    host_info, os, arch}                        │
-  │                                                │
-  │  Master registers session:                     │
-  │  agentID → stream handle                       │
-  │                                                │
-  │◀── MasterMessage{ApplyDesiredState} ───────────│  (current desired state)
-  │                                                │
-  │  [stream stays open indefinitely]              │
-  │                                                │
-  │── AgentMessage{StatusReport} ───────────────▶│  (periodic heartbeat, ~30s)
-  │◀── MasterMessage{Ping} ────────────────────────│  (keepalive)
-  │── AgentMessage{Pong} ───────────────────────▶│
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant Master
+    Agent->>Master: TLS ClientHello (client cert = agent cert)
+    Master-->>Agent: TLS ServerHello (server cert)
+    Note over Agent,Master: mTLS handshake — Master verifies agent cert<br/>against internal CA, checks revocation list
+    Agent->>Master: AgentMessage{Hello}<br/>{agent_id, version, docker_version, os, arch}
+    Note over Master: register session: agentID → stream handle
+    Master-->>Agent: MasterMessage{ApplyDesiredState} (current desired state)
+    Note over Agent,Master: stream stays open indefinitely
+    loop periodic (~30s)
+        Agent->>Master: AgentMessage{StatusReport} (heartbeat)
+        Master-->>Agent: MasterMessage{Ping} (keepalive)
+        Agent->>Master: AgentMessage{Pong}
+    end
 ```
 
 ### 3. Reconnect
@@ -315,16 +311,17 @@ service StackService {
 
 The Master acts as a **bridge** between browser streams and Agent streams:
 
-```
-Browser                    Master                     Agent
-  │                          │                          │
-  │── StreamLogs(req) ──────▶│                          │
-  │                          │── LogRequest ───────────▶│ (via bidi stream)
-  │                          │◀── LogChunk × N ─────────│
-  │◀── LogLine × N ──────────│                          │
-  │                          │                          │
-  │── (disconnect) ─────────▶│                          │
-  │                          │── CancelStream ─────────▶│
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant Master
+    participant Agent
+    Browser->>Master: StreamLogs(req)
+    Master->>Agent: LogRequest (via bidi stream)
+    Agent-->>Master: LogChunk × N
+    Master-->>Browser: LogLine × N
+    Browser->>Master: (disconnect)
+    Master->>Agent: CancelStream
 ```
 
 A `stream_id` (UUID) links `LogRequest`/`CancelStream` on the Agent side to the browser-facing
@@ -333,6 +330,11 @@ waiting browser goroutine.
 
 **Backpressure:** The Agent's `LogChunk`/`StatsChunk` goroutine blocks on the browser goroutine's
 channel. If the browser is slow, the Agent slows down. This prevents unbounded buffering.
+
+> ⚠️ **Not yet implemented.** This bridge is the design; today `StreamLogs`/`StreamStats` return
+> `CodeUnimplemented` on the Master, the agent-side log/stats streamers are not wired into the
+> receive loop, and `ExecCommand` is ignored by the agent. Tracked in
+> [ROADMAP.md](../ROADMAP.md#3-live-streaming--logs-stats-exec).
 
 ---
 

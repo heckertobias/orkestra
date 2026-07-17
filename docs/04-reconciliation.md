@@ -18,9 +18,8 @@ The Master pushes `ApplyDesiredState` to an Agent whenever:
 1. A new assignment is created or updated (deploy, rollback).
 2. An assignment's `desired_status` changes.
 3. An assignment is deleted.
-4. A secret referenced by an active stack version is updated.
-5. An Agent reconnects after being offline (Master always re-pushes full desired state on reconnect).
-6. A periodic **full resync** (configurable, default 5 minutes) to detect external drift.
+4. An Agent reconnects after being offline (Master always re-pushes full desired state on reconnect).
+5. A periodic push (the reconciler re-pushes the full desired state to connected agents every ~15 s).
 
 The message contains the **full** desired state for that server (not a diff) — this makes it
 safe to re-send on reconnect without any missed-delta issues.
@@ -35,59 +34,45 @@ The reconcile loop runs:
 
 ### Algorithm per Stack
 
+This reflects the current implementation (`internal/agent/compose/converge.go`). Planned
+extensions (dependency ordering, health gating, secret materialization, network/volume creation)
+are tracked in [ROADMAP.md](../ROADMAP.md#2-converge-engine--compose-coverage).
+
 ```
 function reconcile(desiredStack StackDesiredState):
 
   if desiredStack.status == REMOVED:
-    remove all containers with label orkestra.stack=<stack_id>
-    remove stack-specific networks and volumes (if not shared)
+    stop + remove all containers with label orkestra.stack-id=<stack_id>
+    return
+
+  if desiredStack.status == STOPPED:
+    stop (but keep) all containers with label orkestra.stack-id=<stack_id>
     return
 
   project = compose_go.Load(
     compose_yaml  = desiredStack.compose_yaml,
     env_overrides = desiredStack.env_vars,
-    secrets       = materialize(desiredStack.secrets),  // → tmpfs files / env
   )
   // project: types.Project (parsed service graph, no orchestration)
 
-  desired  = derive_desired_containers(project)
-  actual   = docker.ContainerList(filter: label=orkestra.stack=<stack_id>)
+  actual = docker.ContainerList(filter: label orkestra.stack-id=<stack_id>)
 
-  diff = compute_diff(desired, actual)
-  //  diff entries: { action: create|recreate|keep|remove, service, spec }
+  // Services are processed in stable alphabetical order (no depends_on ordering yet).
+  for service in sorted(project.services):
+    hash = spec_hash(service)
+    cur  = actual[service.name]
 
-  if desiredStack.status == STOPPED:
-    // stop all running containers but don't remove them
-    for c in actual where c.state == "running":
-      docker.ContainerStop(c.id)
-    return
+    if cur exists AND cur.spec-hash == hash AND cur.state == "running":
+      keep                                   // up-to-date, nothing to do
+    else:
+      if cur exists: stop + remove cur       // drifted or not running → recreate
+      ensure_image(service.image, service.pull_policy)  // pull per pull_policy
+      id = docker.ContainerCreate(spec_from_service(service))
+      docker.ContainerStart(id)
 
-  // Apply diff in dependency order (respects depends_on graph)
-  order = topological_sort(project.services, by: depends_on)
-
-  for service in order:
-    entry = diff[service.name]
-    switch entry.action:
-      case remove:
-        docker.ContainerStop(entry.container_id)
-        docker.ContainerRemove(entry.container_id)
-
-      case create:
-        ensure_networks(service)
-        ensure_volumes(service)
-        docker.ImagePull(service.image) if digest_changed
-        id = docker.ContainerCreate(spec_from_service(service, secrets))
-        docker.ContainerStart(id)
-        if service.healthcheck:
-          wait_healthy(id, timeout=service.healthcheck.start_period)
-
-      case recreate:
-        docker.ContainerStop(entry.container_id)
-        docker.ContainerRemove(entry.container_id)
-        // then create (same as above)
-
-      case keep:
-        // nothing — container matches desired spec
+  // Any managed container whose service is no longer in the project is removed.
+  for orphan in actual not in project.services:
+    stop + remove orphan
 
   report StatusReport to Master
 ```
@@ -99,109 +84,106 @@ Every orkestra-managed container carries these labels:
 | Label | Value |
 |---|---|
 | `orkestra.managed` | `true` |
-| `orkestra.stack` | `<stack_id>` |
-| `orkestra.version` | `<stack_version_id>` |
+| `orkestra.stack-id` | `<stack_id>` |
 | `orkestra.service` | `<compose_service_name>` |
-| `orkestra.spec-hash` | SHA-256 of the normalized service spec |
+| `orkestra.spec-hash` | SHA-256 (truncated) of the normalized service spec |
+| `com.docker.compose.project` / `com.docker.compose.service` | for `docker compose ls`/tooling compatibility |
 
-The **`spec-hash`** determines whether a `recreate` is needed. It is computed as a SHA-256 of:
-- Image reference (resolved to digest if possible)
-- Environment variables (sorted keys)
-- Port bindings (sorted)
-- Volume mounts (sorted)
+The **`spec-hash`** determines whether a `recreate` is needed. It is currently computed as a
+SHA-256 (first 8 bytes) of:
+- Image reference
 - Command / Entrypoint
-- Labels (only orkestra.* excluded from hash)
-- Network aliases
-- Resource limits (memory, CPU)
+- Environment variables
+- Ports
+- Working directory
+- User
+- Privileged flag
 - Restart policy
 
 Hash computation is deterministic and done in Go before any Docker API calls.
 
+> **Note:** the hash does **not** yet cover volumes, `cap_add`/`cap_drop`, or user labels, so
+> changing only those fields does not currently trigger a recreate. Expanding the hash tracks with
+> the field-support work in [ROADMAP.md](../ROADMAP.md#2-converge-engine--compose-coverage).
+
 ### Network & Volume Handling
 
-- **Networks:** Stack-specific networks (defined in `compose.networks`) are created as
-  `orkestra_<stack_id>_<network_name>`. Shared (external) networks are not touched.
-- **Volumes:** Named volumes follow `orkestra_<stack_id>_<volume_name>`. Anonymous volumes are
-  per-container and recreated with the container.
-- **Removal on REMOVED status:** Only non-external networks/volumes are removed. Removal is
-  attempted after all containers are stopped; errors are logged but don't block reporting.
+- **Networks:** user-defined `compose.networks` are **not created yet** — containers currently run
+  on the daemon's default bridge. This means Compose service-name DNS does not resolve between
+  services in a stack. Named-network support is planned
+  ([ROADMAP.md](../ROADMAP.md#2-converge-engine--compose-coverage)).
+- **Volumes:** only **bind mounts** (`type: bind`, `source:target[:ro]`) are applied. Named volumes
+  and tmpfs mounts are currently dropped. Anonymous volumes are per-container and recreated with the
+  container.
+- **Removal on REMOVED status:** managed containers are stopped and removed; orkestra does not
+  create or remove networks/volumes on its own.
 
 ---
 
-## Supported Compose Fields (MVP Matrix)
+## Supported Compose Fields
 
-The Converge Engine supports this subset of the Compose Specification in the MVP. Using an
-unsupported field causes the deploy to **fail with an explicit error** (never silently ignored).
+### Validation vs. execution
 
-### `services.<name>`
+Two different layers touch a compose file, and they do **not** agree on every field:
+
+- **Validation** (`internal/shared/compose/validate.go`, used by the editor): an **unknown** field
+  is a hard **error**; a small set of recognised-but-ignored fields (`deploy`, `profiles`, `links`,
+  `external_links`, `scale`; top-level `configs`, `extensions`) produce a **warning**. Every other
+  spec-valid field passes validation.
+- **Execution** (`converge.go`): only the fields listed as ✅ below are actually translated onto the
+  container. Fields that pass validation but aren't implemented are **silently ignored at deploy
+  time** — this is the current behaviour, not the eventual goal.
+
+> ⚠️ So a stack can validate cleanly and deploy "successfully" while fields like `networks`,
+> named `volumes`, `depends_on`, or `healthcheck` have no effect. Full coverage (and failing loudly
+> on unimplemented fields) is tracked in
+> [ROADMAP.md](../ROADMAP.md#2-converge-engine--compose-coverage).
+
+### `services.<name>` — currently applied
 
 | Field | Support | Notes |
 |---|---|---|
-| `image` | ✅ Full | Image pull before create |
-| `build` | ⚠️ Partial | Build context on local Docker daemon; `build.args`, `build.target`. No BuildKit cache-from/to. |
-| `command` | ✅ Full | |
-| `entrypoint` | ✅ Full | |
-| `environment` | ✅ Full | List and map form |
-| `env_file` | ✅ Full | Relative to stack root (stored alongside compose_yaml) |
-| `ports` | ✅ Full | Short and long syntax; host IP binding |
-| `expose` | ✅ Full | |
-| `volumes` (named) | ✅ Full | `source:target:mode` |
-| `volumes` (bind mount) | ✅ Full | Absolute paths on host |
-| `volumes` (tmpfs) | ✅ Full | |
-| `networks` | ✅ Full | Custom networks, aliases |
-| `depends_on` | ✅ Full | `condition: service_started` and `service_healthy` |
-| `restart` | ✅ Full | no / always / unless-stopped / on-failure[:n] |
-| `healthcheck` | ✅ Full | test, interval, timeout, retries, start_period |
-| `labels` | ✅ Full | Merged with orkestra system labels |
-| `user` | ✅ Full | |
-| `working_dir` | ✅ Full | |
-| `hostname` | ✅ Full | |
-| `extra_hosts` | ✅ Full | |
-| `dns` | ✅ Full | |
-| `cap_add` / `cap_drop` | ✅ Full | |
-| `privileged` | ✅ Full | |
-| `read_only` | ✅ Full | |
-| `security_opt` | ✅ Full | |
-| `sysctls` | ✅ Full | |
-| `ulimits` | ✅ Full | |
-| `mem_limit` / `mem_reservation` | ✅ Full | (top-level shortcuts) |
-| `cpus` / `cpu_shares` | ✅ Full | |
-| `logging` | ✅ Full | driver + options |
-| `stop_grace_period` | ✅ Full | |
-| `init` | ✅ Full | |
-| `tty` / `stdin_open` | ✅ Full | |
-| `profiles` | ❌ Not supported | Error: use separate stacks |
-| `extends` | ❌ Not supported | Pre-merge compose files before submitting |
-| `deploy` (swarm) | ❌ Not supported | Not Swarm |
-| `configs` | ❌ Not supported | Use orkestra Secrets instead |
-| `secrets` (compose native) | ❌ Not supported | Use orkestra Secrets instead |
-| `scale` | ❌ Not supported (M6+) | Single replica per service in MVP |
-| `links` | ❌ Not supported | Use networks |
-| `external_links` | ❌ Not supported | |
-| `volumes_from` | ❌ Not supported | |
-| `network_mode: host/none/container` | ⚠️ Partial | `host` and `none` supported; `container:X` not |
+| `image` | ✅ | Pulled before create per `pull_policy` (anonymous — no private-registry auth) |
+| `pull_policy` | ✅ | `always` / `never` / `build` / `missing` (default) |
+| `command` | ✅ | |
+| `entrypoint` | ✅ | |
+| `environment` | ✅ | List and map form |
+| `env_file` | ✅ | Resolved by the compose-go loader into `environment` |
+| `ports` | ✅ | Short and long syntax; host IP + protocol |
+| `restart` | ✅ | `no` / `always` / `unless-stopped` / `on-failure` (no `:max-retries` count) |
+| `labels` | ✅ | Merged with orkestra system labels |
+| `user` | ✅ | |
+| `working_dir` | ✅ | |
+| `privileged` | ✅ | |
+| `cap_add` / `cap_drop` | ✅ | |
+| `volumes` (bind mount) | ✅ | `source:target[:ro]`, host paths only |
 
-### `networks.<name>` / `volumes.<name>`
+### `services.<name>` — recognised but not yet applied (silently ignored)
 
-| Field | Support |
-|---|---|
-| `driver` | ✅ Full |
-| `driver_opts` | ✅ Full |
-| `external` | ✅ Full |
-| `ipam` | ✅ Full |
-| `attachable` | ✅ Full |
+`expose`, `volumes` (named/tmpfs), `networks`, `depends_on`, `healthcheck`, `hostname`,
+`extra_hosts`, `dns`, `read_only`, `security_opt`, `sysctls`, `ulimits`, `mem_limit` /
+`mem_reservation`, `cpus` / `cpu_shares`, `logging`, `stop_grace_period`, `init`, `tty` /
+`stdin_open`, `devices`, `build`, `network_mode`. See
+[ROADMAP.md](../ROADMAP.md#2-converge-engine--compose-coverage).
+
+### `services.<name>` — flagged by the validator (warning, ignored)
+
+`deploy` (Swarm), `profiles`, `links`, `external_links`, `scale`; top-level `configs`,
+`extensions`. Native Compose `secrets`/`configs` are not used — use orkestra Secrets instead.
+Any **unknown** field is a hard validation error.
 
 ---
 
 ## Drift Detection & Reporting
 
-After each reconcile pass, the Agent sends a `StatusReport` containing:
-- For each stack: running version, per-container state, and a `drift_detected` boolean.
-- `drift_description`: human-readable summary of what was drifted (e.g. "container nginx_web_1
-  found stopped, expected running").
+**Self-healing** is provided by the periodic reconcile: on every pass, any managed container that
+has stopped or whose `spec-hash` no longer matches the desired spec is recreated. So a container
+that is killed or drifts from its spec is brought back automatically on the next reconcile.
 
-The Master stores this in `agent_state` and makes it visible in the UI (drift badge on server
-and stack cards). Drift automatically triggers a reconcile (self-healing).
+The `StatusReport`/`StackStatus` wire format carries per-stack running version, per-container state,
+and `drift_detected` / `drift_description` fields, which the Master stores in `agent_state`. Rich
+drift *reporting* to the UI (drift badges, human-readable drift descriptions) is only partially
+wired — see [ROADMAP.md](../ROADMAP.md).
 
 ---
 
