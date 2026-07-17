@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { RefreshCw, Plus } from 'lucide-react'
 import { Badge, StatusDot } from '@/components/ui/badge'
+import { AddServerDialog } from '@/components/AddServerDialog'
 
 interface Server {
   id: string
@@ -29,6 +30,7 @@ export function ServersPage() {
   const [servers, setServers] = useState<Server[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [showAdd, setShowAdd] = useState(false)
 
   async function load() {
     setLoading(true)
@@ -81,6 +83,7 @@ export function ServersPage() {
             Refresh
           </button>
           <button
+            onClick={() => setShowAdd(true)}
             className="flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium"
             style={{ backgroundColor: 'var(--accent)', color: '#0d1117' }}
           >
@@ -151,6 +154,8 @@ export function ServersPage() {
           </tbody>
         </table>
       </div>
+
+      {showAdd && <AddServerDialog onClose={() => { setShowAdd(false); load() }} />}
     </div>
   )
 }
