@@ -182,10 +182,10 @@ history at `docs/05-secrets.md` prior to this rewrite.
 
 ## 5. Web UI gaps
 
-- 🔲 **Add-Server / enrollment flow** — the "Add Server" button (`web/src/pages/ServersPage.tsx`)
-  has no handler; there is no UI to mint an enrollment token or show the `install-agent.sh` command.
-  Backend RPCs (`CreateEnrollmentToken`) exist — only the UI wiring and the token dialog are missing.
-  (Until then, mint tokens via the API/CLI — `run-dev.sh` shows how.)
+- ✅ **Add-Server / enrollment flow** — the "Add Server" button now opens a dialog that mints a
+  one-time token (`AuthService/CreateEnrollmentToken`) and shows the token + a ready-to-run
+  `orkestra-agent enroll` command (`web/src/components/AddServerDialog.tsx`). A full browser-only
+  enroll is possible.
 - 🔲 **Live logs / stats / exec viewers** — depend on §3.
 - 🔲 **Updates page** — depends on §1.
 - 🔲 **Secret bindings tab** — depends on §4.
