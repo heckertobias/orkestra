@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { KeyRound, Plus, RefreshCw, Trash2, Eye, EyeOff, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { useAuth, canManageSecrets } from '@/lib/auth'
@@ -32,8 +33,6 @@ const empty: CreateForm = { name: '', description: '', provider: 'builtin', valu
 export function SecretsPage() {
   const { user } = useAuth()
   const secretsMgr = canManageSecrets(user)
-  const [secrets, setSecrets] = useState<SecretMeta[]>([])
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState<CreateForm>(empty)
@@ -43,10 +42,9 @@ export function SecretsPage() {
   const [revealState, setRevealState] = useState<{ id: string; value: string; password: string; showing: boolean } | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<SecretMeta | null>(null)
 
-  async function load() {
-    setLoading(true)
-    setError(null)
-    try {
+  const { data: secrets = [], isPending: loading, error: loadError, refetch } = useQuery({
+    queryKey: ['secrets'],
+    queryFn: async (): Promise<SecretMeta[]> => {
       const res = await fetch('/orkestra.v1.SecretService/ListSecrets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -54,7 +52,7 @@ export function SecretsPage() {
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
-      setSecrets((data.secrets ?? []).map((s: Record<string, unknown>) => ({
+      return (data.secrets ?? []).map((s: Record<string, unknown>) => ({
         id:           String(s.id ?? ''),
         name:         String(s.name ?? ''),
         description:  String(s.description ?? ''),
@@ -66,15 +64,9 @@ export function SecretsPage() {
         createdAt:    Number(s.createdAt ?? s.created_at ?? 0),
         updatedAt:    Number(s.updatedAt ?? s.updated_at ?? 0),
         bindingCount: Number(s.bindingCount ?? s.binding_count ?? 0),
-      })))
-    } catch (e) {
-      setError(String(e))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { load() }, [])
+      }))
+    },
+  })
 
   async function createSecret() {
     if (!form.name) { setCreateError('Name is required'); return }
@@ -105,7 +97,7 @@ export function SecretsPage() {
       }
       setShowCreate(false)
       setForm(empty)
-      load()
+      refetch()
     } catch (e) {
       setCreateError(String(e))
     } finally {
@@ -125,7 +117,7 @@ export function SecretsPage() {
         throw new Error(t)
       }
       setDeleteTarget(null)
-      load()
+      refetch()
     } catch (e) {
       setError(String(e))
     }
@@ -158,7 +150,7 @@ export function SecretsPage() {
           <p style={{ color: 'var(--text-muted)' }}>Centrally managed secrets, never persisted in plaintext</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={load}
+          <button onClick={() => refetch()}
             className="flex items-center gap-2 px-3 py-1.5 rounded text-sm border transition-colors hover:bg-[var(--surface-2)]"
             style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
             <RefreshCw size={14} /> Refresh
@@ -173,9 +165,9 @@ export function SecretsPage() {
         </div>
       </div>
 
-      {error && (
+      {(error || loadError) && (
         <div className="mb-4 px-4 py-3 rounded text-sm" style={{ backgroundColor: '#2d1115', color: 'var(--error)', border: '1px solid #4a1a1f' }}>
-          {error}
+          {error ?? String(loadError)}
         </div>
       )}
 

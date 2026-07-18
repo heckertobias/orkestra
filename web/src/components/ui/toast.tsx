@@ -1,22 +1,11 @@
-import { createContext, useContext, useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { X, CheckCircle, AlertCircle, Info } from 'lucide-react'
-
-type ToastVariant = 'success' | 'error' | 'info'
+import { ToastContext, type ToastVariant } from './toast-context'
 
 interface Toast {
   id: string
   message: string
   variant: ToastVariant
-}
-
-interface ToastContextValue {
-  toast: (message: string, variant?: ToastVariant) => void
-}
-
-const ToastContext = createContext<ToastContextValue>({ toast: () => {} })
-
-export function useToast() {
-  return useContext(ToastContext)
 }
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {

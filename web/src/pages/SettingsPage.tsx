@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Key, Shield, Plus, Trash2, Eye, EyeOff, Copy, Lock, Mail } from 'lucide-react'
-import { useToast } from '@/components/ui/toast'
+import { useToast } from '@/components/ui/toast-context'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

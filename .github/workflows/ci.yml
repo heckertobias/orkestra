@@ -2,8 +2,14 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: ["main"]
   pull_request:
+
+# One in-flight run per ref: pushing a new commit to a PR cancels the previous,
+# still-running CI for that PR instead of piling up parallel runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-test:
@@ -62,6 +68,33 @@ jobs:
 
       - name: buf lint
         run: buf lint
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # tsc + vite build. The app talks to the API over fetch, so web/gen
+      # (generated Connect clients) is not needed for the build.
+      - name: Build
+        run: npm run build
+
+      - name: Lint
+        run: npm run lint
 
   integration:
     name: Integration Tests

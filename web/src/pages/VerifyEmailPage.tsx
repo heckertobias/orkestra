@@ -6,15 +6,15 @@ export function VerifyEmailPage() {
   const [params] = useSearchParams()
   const token = params.get('token') ?? ''
 
-  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading')
-  const [message, setMessage] = useState('')
+  // Initialise from the token so the effect never calls setState synchronously
+  // (the no-token case is a derived initial state, not an effect side-effect).
+  const [status, setStatus] = useState<'loading' | 'success' | 'error'>(token ? 'loading' : 'error')
+  const [message, setMessage] = useState(
+    token ? '' : 'No token found in the link. Please use the link from your confirmation email.',
+  )
 
   useEffect(() => {
-    if (!token) {
-      setStatus('error')
-      setMessage('No token found in the link. Please use the link from your confirmation email.')
-      return
-    }
+    if (!token) return
 
     fetch('/orkestra.v1.AuthService/ConfirmEmailChange', {
       method: 'POST',

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Plus, RefreshCw, Pencil, X, ChevronDown, ChevronRight, Check, Info, KeyRound, Mail } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { useAuth, isAdmin } from '@/lib/auth'
@@ -157,11 +158,6 @@ function errText(e: unknown): string {
 
 export function UsersPage() {
   const { user: me } = useAuth()
-  const [users, setUsers]     = useState<User[]>([])
-  const [servers, setServers] = useState<Server[]>([])
-  const [stacks, setStacks]   = useState<Stack[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError]     = useState<string | null>(null)
   const [showCreate, setShowCreate]   = useState(false)
   const [editPerms, setEditPerms]     = useState<User | null>(null)
   const [form, setForm] = useState({ username: '', displayName: '', password: '', ssoOnly: false })
@@ -170,10 +166,9 @@ export function UsersPage() {
 
   const admin = isAdmin(me)
 
-  async function load() {
-    setLoading(true)
-    setError(null)
-    try {
+  const { data, isPending: loading, error, refetch } = useQuery({
+    queryKey: ['usersPage'],
+    queryFn: async (): Promise<{ users: User[]; servers: Server[]; stacks: Stack[] }> => {
       const [uRes, sRes, stRes] = await Promise.all([
         fetch('/orkestra.v1.AuthService/ListUsers', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
@@ -185,9 +180,12 @@ export function UsersPage() {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
         }),
       ])
+      let users: User[] = []
+      let servers: Server[] = []
+      let stacks: Stack[] = []
       if (uRes.ok) {
         const d = await uRes.json()
-        setUsers((d.users ?? []).map((u: Record<string, unknown>) => ({
+        users = (d.users ?? []).map((u: Record<string, unknown>) => ({
           id:          String(u.id ?? ''),
           username:    String(u.username ?? ''),
           displayName: String(u.displayName ?? u.display_name ?? ''),
@@ -204,11 +202,11 @@ export function UsersPage() {
             serverId: String(b.serverId ?? b.server_id ?? ''),
             stackId:  String(b.stackId ?? b.stack_id ?? ''),
           })) : [],
-        })))
+        }))
       }
       if (sRes.ok) {
         const d = await sRes.json()
-        setServers((d.servers ?? []).map((s: Record<string, unknown>) => ({
+        servers = (d.servers ?? []).map((s: Record<string, unknown>) => ({
           id:   String(s.id ?? ''),
           name: String(s.name ?? ''),
           assignments: Array.isArray(s.assignments)
@@ -216,23 +214,21 @@ export function UsersPage() {
                 stackId: String(a.stackId ?? a.stack_id ?? ''),
               }))
             : [],
-        })))
+        }))
       }
       if (stRes.ok) {
         const d = await stRes.json()
-        setStacks((d.stacks ?? []).map((s: Record<string, unknown>) => ({
+        stacks = (d.stacks ?? []).map((s: Record<string, unknown>) => ({
           id:   String(s.id ?? ''),
           name: String(s.name ?? ''),
-        })))
+        }))
       }
-    } catch (e) {
-      setError(errText(e))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { load() }, [])
+      return { users, servers, stacks }
+    },
+  })
+  const users = data?.users ?? []
+  const servers = data?.servers ?? []
+  const stacks = data?.stacks ?? []
 
   async function createUser() {
     if (!form.username) { setFormError('Email address required'); return }
@@ -247,7 +243,7 @@ export function UsersPage() {
       if (!res.ok) throw new Error(apiError(await res.text()))
       setShowCreate(false)
       setForm({ username: '', displayName: '', password: '', ssoOnly: false })
-      load()
+      refetch()
     } catch (e) {
       setFormError(errText(e))
     } finally {
@@ -263,7 +259,7 @@ export function UsersPage() {
           <p style={{ color: 'var(--text-muted)' }}>Manage users, authentication, and role-based access</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={load}
+          <button onClick={() => refetch()}
             className="flex items-center gap-2 px-3 py-1.5 rounded text-sm border transition-colors hover:bg-[var(--surface-2)]"
             style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
             <RefreshCw size={14} /> Refresh
@@ -278,7 +274,7 @@ export function UsersPage() {
         </div>
       </div>
 
-      {error && <ErrorBar>{error}</ErrorBar>}
+      {error && <ErrorBar>{errText(error)}</ErrorBar>}
 
       <div className="rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}>
         <table className="w-full text-sm">
@@ -401,7 +397,7 @@ export function UsersPage() {
           stacks={stacks}
           isSelf={me?.id === editPerms.id}
           onClose={() => setEditPerms(null)}
-          onSaved={() => { setEditPerms(null); load() }}
+          onSaved={() => { setEditPerms(null); refetch() }}
         />
       )}
     </div>
