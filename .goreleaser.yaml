@@ -3,8 +3,11 @@ version: 2
 project_name: orkestra
 
 before:
+  # Order matters: codegen first (Go stubs in internal/shared/gen, TS clients in
+  # web/gen), then the web build (embedded via go:embed), before goreleaser builds
+  # the Go binaries. Any `go` command must run after `make proto`/`make sqlc`, or
+  # it fails resolving the generated packages.
   hooks:
-    - go mod tidy
     - make proto
     - make sqlc
     - npm --prefix web ci
