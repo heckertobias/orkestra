@@ -4,4 +4,4 @@ baseurl=https://heckertobias.github.io/orkestra/rpm
 enabled=1
 gpgcheck=0
 repo_gpgcheck=1
-gpgkey=https://heckertobias.github.io/orkestra/orkestra.gpg
+gpgkey=https://heckertobias.github.io/orkestra/orkestra.asc
