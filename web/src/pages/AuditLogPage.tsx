@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { RefreshCw } from 'lucide-react'
 
 interface AuditEntry {
@@ -14,18 +14,13 @@ interface AuditEntry {
 }
 
 export function AuditLogPage() {
-  const [entries, setEntries] = useState<AuditEntry[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  async function load() {
-    setLoading(true)
-    setError(null)
-    try {
+  const { data: entries = [], isPending: loading, error, refetch } = useQuery({
+    queryKey: ['audit'],
+    queryFn: async (): Promise<AuditEntry[]> => {
       const res = await fetch('/api/audit')
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
-      setEntries((data.entries ?? []).map((e: Record<string, unknown>) => ({
+      return (data.entries ?? []).map((e: Record<string, unknown>) => ({
         id:         Number(e.id ?? 0),
         ts:         Number(e.ts ?? 0),
         actorId:    String(e.actorId ?? e.actor_id ?? ''),
@@ -35,15 +30,9 @@ export function AuditLogPage() {
         targetId:   String(e.targetId ?? e.target_id ?? ''),
         ipAddress:  String(e.ipAddress ?? e.ip_address ?? ''),
         error:      String(e.error ?? ''),
-      })))
-    } catch (e) {
-      setError(String(e))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { load() }, [])
+      }))
+    },
+  })
 
   return (
     <div>
@@ -52,7 +41,7 @@ export function AuditLogPage() {
           <h1 className="text-xl font-semibold" style={{ color: 'var(--text)' }}>Audit Log</h1>
           <p style={{ color: 'var(--text-muted)' }}>All privileged actions and authentication events</p>
         </div>
-        <button onClick={load}
+        <button onClick={() => refetch()}
           className="flex items-center gap-2 px-3 py-1.5 rounded text-sm border transition-colors hover:bg-[var(--surface-2)]"
           style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
           <RefreshCw size={14} /> Refresh
@@ -61,7 +50,7 @@ export function AuditLogPage() {
 
       {error && (
         <div className="mb-4 px-4 py-3 rounded text-sm" style={{ backgroundColor: '#2d1115', color: 'var(--error)', border: '1px solid #4a1a1f' }}>
-          {error}
+          {String(error)}
         </div>
       )}
 

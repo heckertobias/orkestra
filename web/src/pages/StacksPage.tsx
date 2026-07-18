@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import { Plus, RefreshCw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -13,33 +13,25 @@ interface Stack {
 
 export function StacksPage() {
   const navigate = useNavigate()
-  const [stacks, setStacks] = useState<Stack[]>([])
-  const [loading, setLoading] = useState(true)
-
-  async function load() {
-    setLoading(true)
-    try {
+  const { data: stacks = [], isPending: loading, refetch } = useQuery({
+    queryKey: ['stacks'],
+    queryFn: async (): Promise<Stack[]> => {
       const res = await fetch('/orkestra.v1.StackService/ListStacks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       })
-      if (res.ok) {
-        const data = await res.json()
-        setStacks((data.stacks ?? []).map((s: Record<string, unknown>) => ({
-          id:          String(s.id ?? ''),
-          name:        String(s.name ?? ''),
-          description: String(s.description ?? ''),
-          version:     Number(s.version ?? 0),
-          createdAt:   Number(s.createdAt ?? s.created_at ?? 0),
-        })))
-      }
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { load() }, [])
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      return (data.stacks ?? []).map((s: Record<string, unknown>) => ({
+        id:          String(s.id ?? ''),
+        name:        String(s.name ?? ''),
+        description: String(s.description ?? ''),
+        version:     Number(s.version ?? 0),
+        createdAt:   Number(s.createdAt ?? s.created_at ?? 0),
+      }))
+    },
+  })
 
   return (
     <div>
@@ -49,7 +41,7 @@ export function StacksPage() {
           <p style={{ color: 'var(--text-muted)' }}>Compose stack definitions and deployments</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={load}
+          <button onClick={() => refetch()}
             className="flex items-center gap-2 px-3 py-1.5 rounded text-sm border transition-colors hover:bg-[var(--surface-2)]"
             style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
             <RefreshCw size={14} /> Refresh

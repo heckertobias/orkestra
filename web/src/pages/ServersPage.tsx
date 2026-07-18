@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { RefreshCw, Plus } from 'lucide-react'
 import { Badge, StatusDot } from '@/components/ui/badge'
@@ -27,15 +28,11 @@ function timeAgo(ms: number): string {
 }
 
 export function ServersPage() {
-  const [servers, setServers] = useState<Server[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(false)
 
-  async function load() {
-    setLoading(true)
-    setError(null)
-    try {
+  const { data: servers = [], isPending: loading, error, refetch } = useQuery({
+    queryKey: ['servers'],
+    queryFn: async (): Promise<Server[]> => {
       // Use fetch against the Connect JSON API until gen/ is built in CI.
       const res = await fetch('/orkestra.v1.StackService/ListServers', {
         method: 'POST',
@@ -44,7 +41,7 @@ export function ServersPage() {
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
-      setServers((data.servers ?? []).map((s: Record<string, unknown>) => ({
+      return (data.servers ?? []).map((s: Record<string, unknown>) => ({
         id:            String(s.id ?? ''),
         name:          String(s.name ?? ''),
         hostname:      String(s.hostname ?? ''),
@@ -55,15 +52,9 @@ export function ServersPage() {
         status:        String(s.status ?? 'offline'),
         lastSeenAt:    Number(s.lastSeenAt ?? s.last_seen_at ?? 0),
         enrolledAt:    Number(s.enrolledAt ?? s.enrolled_at ?? 0),
-      })))
-    } catch (e) {
-      setError(String(e))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { load() }, [])
+      }))
+    },
+  })
 
   return (
     <div>
@@ -75,7 +66,7 @@ export function ServersPage() {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={load}
+            onClick={() => refetch()}
             className="flex items-center gap-2 px-3 py-1.5 rounded text-sm border transition-colors hover:bg-[var(--surface-2)]"
             style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
           >
@@ -96,7 +87,7 @@ export function ServersPage() {
       {/* Error */}
       {error && (
         <div className="mb-4 px-4 py-3 rounded text-sm" style={{ backgroundColor: '#2d1115', color: 'var(--error)', border: '1px solid #4a1a1f' }}>
-          {error}
+          {String(error)}
         </div>
       )}
 
@@ -155,7 +146,7 @@ export function ServersPage() {
         </table>
       </div>
 
-      {showAdd && <AddServerDialog onClose={() => { setShowAdd(false); load() }} />}
+      {showAdd && <AddServerDialog onClose={() => { setShowAdd(false); refetch() }} />}
     </div>
   )
 }

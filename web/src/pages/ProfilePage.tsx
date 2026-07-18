@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '@/lib/auth'
-import { useToast } from '@/components/ui/toast'
+import { useToast } from '@/components/ui/toast-context'
 
 function connectPost(procedure: string, body: unknown) {
   return fetch(`/orkestra.v1.AuthService/${procedure}`, {

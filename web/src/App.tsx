@@ -17,7 +17,8 @@ import { UsersPage } from './pages/UsersPage'
 import { AuditLogPage } from './pages/AuditLogPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { ProfilePage } from './pages/ProfilePage'
-import { AuthProvider, useAuth } from './lib/auth'
+import { useAuth } from './lib/auth'
+import { AuthProvider } from './lib/AuthProvider'
 import { ToastProvider } from './components/ui/toast'
 
 const queryClient = new QueryClient({
