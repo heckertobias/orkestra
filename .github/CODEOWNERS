@@ -1,0 +1,3 @@
+# Default owner for everything in the repo. Combined with the branch ruleset's
+# "require review from Code Owners", this requests @heckertobias on every PR.
+* @heckertobias
