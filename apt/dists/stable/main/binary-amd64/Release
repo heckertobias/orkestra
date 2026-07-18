@@ -1,0 +1,6 @@
+Archive: stable
+Component: main
+Origin: orkestra
+Label: orkestra
+Architecture: amd64
+Description: orkestra apt repository

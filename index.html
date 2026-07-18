@@ -1,0 +1,11 @@
+<!doctype html><meta charset="utf-8"><title>orkestra package repository</title>
+<body style="font-family:system-ui;max-width:52rem;margin:3rem auto;padding:0 1rem;line-height:1.5">
+<h1>orkestra package repository</h1>
+<h2>Debian / Ubuntu (apt)</h2>
+<pre>curl -fsSL https://heckertobias.github.io/orkestra/orkestra.gpg | sudo tee /usr/share/keyrings/orkestra.gpg >/dev/null
+echo "deb [signed-by=/usr/share/keyrings/orkestra.gpg] https://heckertobias.github.io/orkestra/apt stable main" | sudo tee /etc/apt/sources.list.d/orkestra.list
+sudo apt update &amp;&amp; sudo apt install orkestra-agent   # or orkestra-master</pre>
+<h2>Fedora / RHEL (dnf)</h2>
+<pre>sudo dnf config-manager --add-repo https://heckertobias.github.io/orkestra/rpm/orkestra.repo
+sudo dnf install orkestra-agent   # or orkestra-master</pre>
+</body>

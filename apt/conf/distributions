@@ -1,0 +1,8 @@
+Origin: orkestra
+Label: orkestra
+Suite: stable
+Codename: stable
+Architectures: amd64 arm64
+Components: main
+Description: orkestra apt repository
+SignWith: 1FDA47AB94EBA472
