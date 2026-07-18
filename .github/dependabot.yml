@@ -19,6 +19,14 @@ updates:
     groups:
       npm-dependencies:
         patterns: ["*"]
+    ignore:
+      # typescript-eslint@8.x only supports peer typescript <6.1, so bumping
+      # TypeScript to 7.x breaks `npm ci` (ERESOLVE). Hold back the TS 7 major
+      # until typescript-eslint widens its peer range (watch its releases —
+      # that's the signal), then remove this entry. Scoped to 7.x on purpose so
+      # the NEXT major (8.x) still surfaces as a PR.
+      - dependency-name: "typescript"
+        versions: ["7.x"]
 
   # GitHub Actions (keeps the SHA-pinned actions up to date)
   - package-ecosystem: github-actions
