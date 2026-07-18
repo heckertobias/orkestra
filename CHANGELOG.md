@@ -2,9 +2,11 @@
 
 All notable changes to orkestra are documented here.
 
-## [Unreleased]
+## [v0.1.0] — 2026-07-18
 
-Work landed on `main` after the `v0.1.0` tag. See [ROADMAP.md](ROADMAP.md) for what is still open.
+First published release. orkestra is a lightweight Master/Agent orchestrator for Docker Compose
+stacks across Linux servers. Beyond the initial M0–M7 scaffold (detailed under *Foundation* below),
+this release adds:
 
 - **M8 — RBAC depth:** per-server / per-stack role bindings, a dedicated `secrets-manager` role,
   and a permissions-matrix UI.
@@ -29,11 +31,7 @@ Work landed on `main` after the `v0.1.0` tag. See [ROADMAP.md](ROADMAP.md) for w
 - **Web:** the "Add Server" button now opens an enrollment dialog (mint token + copy the
   `orkestra-agent enroll` command) — a browser-only agent connect.
 
-## [v0.1.0] — 2026-06-07
-
-Initial release. orkestra is a lightweight Master/Agent orchestrator for Docker Compose stacks across Linux servers.
-
-### Features
+### Foundation (M0–M7)
 
 **M0 — Repo Scaffolding**
 - Go module, buf/proto code generation, sqlc, Makefile, GitHub Actions CI
