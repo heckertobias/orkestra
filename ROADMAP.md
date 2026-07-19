@@ -1,8 +1,12 @@
 # orkestra — Roadmap & Planned Features
 
-This is the single place that tracks **everything not yet built**: planned features, partially
+This is the single place that tracks **what is not yet built**: planned features, partially
 landed foundations, and open design questions. The `docs/` directory describes what orkestra
 **actually does today**; anything aspirational lives here.
+
+> **Note:** this list is **not exhaustive or final**. The items below are the features currently
+> intended to be built, but the set may still grow, shrink, or change — it does not claim to cover
+> everything orkestra will eventually need.
 
 **Status legend**
 
@@ -187,10 +191,6 @@ history at `docs/05-secrets.md` prior to this rewrite.
 
 ## 5. Web UI gaps
 
-- ✅ **Add-Server / enrollment flow** — the "Add Server" button now opens a dialog that mints a
-  one-time token (`AuthService/CreateEnrollmentToken`) and shows the token + a ready-to-run
-  `orkestra-agent enroll` command (`web/src/components/AddServerDialog.tsx`). A full browser-only
-  enroll is possible.
 - 🔲 **Live logs / stats / exec viewers** — depend on §3.
 - 🔲 **Updates page** — depends on §1.
 - 🔲 **Secret bindings tab** — depends on §4.
@@ -211,11 +211,6 @@ The KEK is loaded via a pluggable `KeySource` (`internal/master/keys/`). Impleme
 
 ## 7. Packaging & distribution
 
-- ✅ **apt/dnf packages** — `.deb` + `.rpm` for `orkestra-master` and `orkestra-agent` (amd64/arm64)
-  built by goreleaser/nfpm, published to a GPG-signed GitHub Pages repo
-  (`https://heckertobias.github.io/orkestra/{apt,rpm}`). `apt install` / `dnf install` +
-  `apt upgrade` / `dnf upgrade`. Config in `.goreleaser.yaml`, `deploy/packaging/`,
-  `.github/workflows/release.yml`.
 - 🔲 **Container-agent self-update** — surfaced/orchestrated via the update system (§1); packages
   don't cover container agents.
 - 💡 **More channels** — Homebrew tap, Alpine `.apk`, Arch AUR, if demand appears.

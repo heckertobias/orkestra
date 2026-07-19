@@ -2,6 +2,10 @@
 
 Lightweight orchestrator for Docker/Compose hosts — a simpler alternative to Kubernetes or Nomad when all you need is centrally managed, self-healing Compose stacks across multiple Linux servers.
 
+> ⚠️ **Work in progress.** orkestra is under active development and **not yet production-ready** —
+> APIs, schemas, and features may change without notice. See [ROADMAP.md](ROADMAP.md) for an
+> incomplete list of what's still open.
+
 ## Why orkestra?
 
 Plain "SSH + docker compose" is not centrally controllable, not self-healing, and not auditable. Kubernetes and Nomad are too heavy for standalone Docker hosts. orkestra fills this gap.

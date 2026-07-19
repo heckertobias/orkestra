@@ -71,8 +71,6 @@ serves on `localhost:5173` and the Master (built with `-tags dev`) proxies reque
 > (Login, Dashboard, Servers, Server Detail, Stacks, Stack Editor, Secrets, Users & Roles, Audit
 > Log, Settings, Profile). A few described features are **not yet functional** and are tracked in
 > [ROADMAP.md](../ROADMAP.md):
-> - **Add-Server / enrollment-token dialog** — the button exists but has no handler; mint tokens via
->   the API/CLI for now ([ROADMAP §5](../ROADMAP.md#5-web-ui-gaps)).
 > - **Live Logs drawer, Live Stats charts, container exec/terminal** — depend on the streaming
 >   pipeline ([ROADMAP §3](../ROADMAP.md#3-live-streaming--logs-stats-exec)).
 > - **Secret bindings tab & OpenBao secret option / migration** — depend on secret distribution and
