@@ -8,8 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
+	"github.com/moby/moby/client"
 
 	"github.com/heckertobias/orkestra/internal/agent/compose"
 	"github.com/heckertobias/orkestra/internal/agent/dockerctl"
@@ -32,7 +31,7 @@ func TestConvergeDeploysContainer(t *testing.T) {
 		t.Fatalf("dockerctl.New: %v", err)
 	}
 	raw := dc.RawClient()
-	if _, err := raw.Ping(ctx); err != nil {
+	if _, err := raw.Ping(ctx, client.PingOptions{}); err != nil {
 		t.Skipf("no reachable Docker daemon: %v", err)
 	}
 
@@ -62,20 +61,19 @@ func TestConvergeDeploysContainer(t *testing.T) {
 	}
 
 	// Assert a managed container for this stack is running.
-	containers, err := raw.ContainerList(ctx, container.ListOptions{
+	res, err := raw.ContainerList(ctx, client.ContainerListOptions{
 		All: true,
-		Filters: filters.NewArgs(
-			filters.Arg("label", "orkestra.managed=true"),
-			filters.Arg("label", "orkestra.stack-id="+stackID),
-		),
+		Filters: make(client.Filters).
+			Add("label", "orkestra.managed=true").
+			Add("label", "orkestra.stack-id="+stackID),
 	})
 	if err != nil {
 		t.Fatalf("ContainerList: %v", err)
 	}
-	if len(containers) == 0 {
+	if len(res.Items) == 0 {
 		t.Fatal("no managed container found after converge")
 	}
-	for _, c := range containers {
+	for _, c := range res.Items {
 		if c.State != "running" {
 			t.Fatalf("container %s state = %q, want running", c.ID[:12], c.State)
 		}

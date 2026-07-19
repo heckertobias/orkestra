@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 
-	agentmetrics "github.com/heckertobias/orkestra/internal/agent/metrics"
 	"github.com/heckertobias/orkestra/internal/agent/compose"
+	agentmetrics "github.com/heckertobias/orkestra/internal/agent/metrics"
 	orkestraV1 "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1"
 )
 

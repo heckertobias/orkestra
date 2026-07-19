@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/heckertobias/orkestra/internal/agent/conn"

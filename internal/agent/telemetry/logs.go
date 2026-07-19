@@ -9,8 +9,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	dockerevents "github.com/docker/docker/api/types/events"
+	dockerevents "github.com/moby/moby/api/types/events"
+	"github.com/moby/moby/client"
 
 	"github.com/heckertobias/orkestra/internal/agent/dockerctl"
 	orkestraV1 "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1"
@@ -33,7 +33,7 @@ func (ls *LogStreamer) Stream(ctx context.Context, streamID, containerID string,
 		tailStr = fmt.Sprintf("%d", tail)
 	}
 
-	rc, err := ls.dc.Logs(ctx, containerID, container.LogsOptions{
+	rc, err := ls.dc.Logs(ctx, containerID, client.ContainerLogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Follow:     follow,
@@ -164,4 +164,3 @@ func (ss *StatsStreamer) collectStats(ctx context.Context, containerIDs []string
 	}
 	return out, nil
 }
-
