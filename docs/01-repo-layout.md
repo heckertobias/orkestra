@@ -78,7 +78,7 @@ Implements the **Converge Engine** — the most complex package. See
 ### `internal/master/secrets`
 
 Houses the built-in secret sealing helpers (`Seal`/`Open`, XChaCha20-Poly1305 + KEK). The OpenBao
-backend is planned. See [05-secrets.md](05-secrets.md) and [ROADMAP.md](../ROADMAP.md).
+backend is planned. See [05-secrets.md](05-secrets.md) and [#23](https://github.com/heckertobias/orkestra/issues/23).
 
 ---
 

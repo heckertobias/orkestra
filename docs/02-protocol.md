@@ -14,7 +14,7 @@ One protobuf schema, one Go server, both clients happy.
 > the persistent `Connect` stream, `ApplyDesiredState`, heartbeats, and cert renewal are wired
 > end-to-end. The **live-stream** paths (`StreamLogs`/`StreamStats`, `ExecOnContainer`/`ExecCommand`)
 > and **pre-resolved secrets** (`ResolvedSecret`) exist as wire format but are **not yet wired
-> end-to-end** — see [ROADMAP.md](../ROADMAP.md).
+> end-to-end** — see [#19](https://github.com/heckertobias/orkestra/issues/19), [#20](https://github.com/heckertobias/orkestra/issues/20), [#21](https://github.com/heckertobias/orkestra/issues/21) (live streams) and [#22](https://github.com/heckertobias/orkestra/issues/22) (pre-resolved secrets).
 
 ---
 
@@ -334,7 +334,7 @@ channel. If the browser is slow, the Agent slows down. This prevents unbounded b
 > ⚠️ **Not yet implemented.** This bridge is the design; today `StreamLogs`/`StreamStats` return
 > `CodeUnimplemented` on the Master, the agent-side log/stats streamers are not wired into the
 > receive loop, and `ExecCommand` is ignored by the agent. Tracked in
-> [ROADMAP.md](../ROADMAP.md#3-live-streaming--logs-stats-exec).
+> [#19](https://github.com/heckertobias/orkestra/issues/19), [#20](https://github.com/heckertobias/orkestra/issues/20), [#21](https://github.com/heckertobias/orkestra/issues/21).
 
 ---
 

@@ -69,7 +69,7 @@ flowchart TB
 | Persistence | **PostgreSQL** + **sqlc** (pgx/v5) for type-safe SQL | External DB; robust concurrency, JSONB indexes, `LISTEN/NOTIFY` for reconciler |
 | Migrations | `pressly/goose` | Versioned schema migrations |
 | Auth (users) | local: `argon2id`; OIDC: `coreos/go-oidc` + `golang.org/x/oauth2` | Local as default, OIDC optional |
-| Secrets | built-in encrypted store (XChaCha20-Poly1305 + KEK); OpenBao backend planned | Built-in works today; pluggable backend designed for later (see `ROADMAP.md`) |
+| Secrets | built-in encrypted store (XChaCha20-Poly1305 + KEK); OpenBao backend planned | Built-in works today; pluggable backend designed for later (see [#23](https://github.com/heckertobias/orkestra/issues/23)) |
 | Logging | `log/slog` (stdlib) | Structured logs |
 | Metrics | `prometheus/client_golang` | `/metrics` on Master & Agent |
 | Frontend | **React** + TypeScript + Vite; `@connectrpc/connect-web`; TanStack Query; Tailwind | SPA against Connect API; generated TS clients from protobuf |
@@ -91,4 +91,4 @@ one artifact that serves both the API and the UI.
 - [06-security-auth.md](06-security-auth.md) — PKI/mTLS, User Auth, RBAC, Audit
 - [07-web-ui.md](07-web-ui.md) — UI pages & frontend stack
 - [08-deployment.md](08-deployment.md) — Observability & deployment
-- [ROADMAP.md](../ROADMAP.md) — planned features & known gaps
+- [Roadmap (GitHub issues)](https://github.com/heckertobias/orkestra/issues?q=is%3Aopen+label%3Aroadmap) — planned features & known gaps

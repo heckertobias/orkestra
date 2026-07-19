@@ -3,7 +3,7 @@
 Lightweight orchestrator for Docker/Compose hosts — a simpler alternative to Kubernetes or Nomad when all you need is centrally managed, self-healing Compose stacks across multiple Linux servers.
 
 > ⚠️ **Work in progress.** orkestra is under active development and **not yet production-ready** —
-> APIs, schemas, and features may change without notice. See [ROADMAP.md](ROADMAP.md) for an
+> APIs, schemas, and features may change without notice. See the [open roadmap issues](https://github.com/heckertobias/orkestra/issues?q=is%3Aopen+label%3Aroadmap) for an
 > incomplete list of what's still open.
 
 ## Why orkestra?
@@ -17,7 +17,7 @@ Plain "SSH + docker compose" is not centrally controllable, not self-healing, an
 > **Status:** the core loop — enroll an agent, define a Compose stack, assign it, and have the agent
 > pull images and run/heal containers — works end-to-end. Some features are still in progress (live
 > logs/stats/exec, named networks/volumes, secret injection, fleet updates). See
-> [ROADMAP.md](ROADMAP.md) for what's planned and what's partial.
+> the [roadmap issues](https://github.com/heckertobias/orkestra/issues?q=is%3Aopen+label%3Aroadmap) for what's planned and what's partial.
 
 ## Architecture
 
@@ -161,7 +161,7 @@ make web      # npm run build in web/
 - [docs/06-security-auth.md](docs/06-security-auth.md) — PKI/mTLS, user auth, RBAC, audit
 - [docs/07-web-ui.md](docs/07-web-ui.md) — UI pages & frontend stack
 - [docs/08-deployment.md](docs/08-deployment.md) — Observability & deployment
-- [ROADMAP.md](ROADMAP.md) — Planned features, partial foundations & known gaps
+- [Roadmap (GitHub issues)](https://github.com/heckertobias/orkestra/issues?q=is%3Aopen+label%3Aroadmap) — Planned features, partial foundations & known gaps, tracked as issues (labels `planned` / `partial` / `idea`)
 
 ## License
 

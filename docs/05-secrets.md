@@ -3,7 +3,7 @@
 > **Scope of this document.** It describes what the secrets subsystem does **today**: a built-in
 > encrypted secret store with CRUD, reveal-with-reauth, and audit. Two larger pieces are designed
 > but **not yet implemented** — delivering secrets into running deployments (materialization) and
-> the OpenBao backend. Those live in [ROADMAP.md](../ROADMAP.md#4-secrets--distribution-materialization--openbao).
+> the OpenBao backend. Those live in [#22](https://github.com/heckertobias/orkestra/issues/22) and [#23](https://github.com/heckertobias/orkestra/issues/23).
 
 ## Design Goals
 
@@ -83,7 +83,7 @@ into which service and how:
 > `ApplyDesiredState`, so bound secrets do not reach containers yet. The end-to-end path
 > (resolution → `ResolvedSecret` over mTLS → agent-side ENV/FILE/DOCKER_SECRET materialization →
 > cleanup on stop/remove) plus a bindings editor are tracked in
-> [ROADMAP.md](../ROADMAP.md#4-secrets--distribution-materialization--openbao).
+> [#22](https://github.com/heckertobias/orkestra/issues/22).
 
 ---
 
@@ -106,4 +106,4 @@ the encryption provides no protection.
   is no code that reads/writes OpenBao, and `RevealSecret`/`MigrateProvider` reject it.
 - **No value history / native rotation** in the built-in store (planned alongside OpenBao KV v2).
 
-All three are tracked in [ROADMAP.md](../ROADMAP.md#4-secrets--distribution-materialization--openbao).
+All three are tracked in [#22](https://github.com/heckertobias/orkestra/issues/22) and [#23](https://github.com/heckertobias/orkestra/issues/23).

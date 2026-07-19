@@ -70,12 +70,12 @@ serves on `localhost:5173` and the Master (built with `-tags dev`) proxies reque
 > **Implementation status.** The pages below describe the intended UI. Most are built and wired
 > (Login, Dashboard, Servers, Server Detail, Stacks, Stack Editor, Secrets, Users & Roles, Audit
 > Log, Settings, Profile). A few described features are **not yet functional** and are tracked in
-> [ROADMAP.md](../ROADMAP.md):
+> the [roadmap issues](https://github.com/heckertobias/orkestra/issues?q=is%3Aopen+label%3Aroadmap):
 > - **Live Logs drawer, Live Stats charts, container exec/terminal** — depend on the streaming
->   pipeline ([ROADMAP §3](../ROADMAP.md#3-live-streaming--logs-stats-exec)).
+>   pipeline ([#19](https://github.com/heckertobias/orkestra/issues/19), [#20](https://github.com/heckertobias/orkestra/issues/20), [#21](https://github.com/heckertobias/orkestra/issues/21)).
 > - **Secret bindings tab & OpenBao secret option / migration** — depend on secret distribution and
->   the OpenBao backend ([ROADMAP §4](../ROADMAP.md#4-secrets--distribution-materialization--openbao)).
-> - **Updates page** — depends on the update system ([ROADMAP §1](../ROADMAP.md#1-update-system-fleet-updates)).
+>   the OpenBao backend ([#22](https://github.com/heckertobias/orkestra/issues/22), [#23](https://github.com/heckertobias/orkestra/issues/23)).
+> - **Updates page** — depends on the update system ([#9](https://github.com/heckertobias/orkestra/issues/9)).
 
 ### 1. Dashboard (`/`)
 

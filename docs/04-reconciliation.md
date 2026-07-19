@@ -36,7 +36,7 @@ The reconcile loop runs:
 
 This reflects the current implementation (`internal/agent/compose/converge.go`). Planned
 extensions (dependency ordering, health gating, secret materialization, network/volume creation)
-are tracked in [ROADMAP.md](../ROADMAP.md#2-converge-engine--compose-coverage).
+are tracked in the [roadmap issues](https://github.com/heckertobias/orkestra/issues?q=is%3Aopen+label%3Aroadmap).
 
 ```
 function reconcile(desiredStack StackDesiredState):
@@ -104,14 +104,14 @@ Hash computation is deterministic and done in Go before any Docker API calls.
 
 > **Note:** the hash does **not** yet cover volumes, `cap_add`/`cap_drop`, or user labels, so
 > changing only those fields does not currently trigger a recreate. Expanding the hash tracks with
-> the field-support work in [ROADMAP.md](../ROADMAP.md#2-converge-engine--compose-coverage).
+> the field-support work — see [#13](https://github.com/heckertobias/orkestra/issues/13) and [#18](https://github.com/heckertobias/orkestra/issues/18).
 
 ### Network & Volume Handling
 
 - **Networks:** user-defined `compose.networks` are **not created yet** — containers currently run
   on the daemon's default bridge. This means Compose service-name DNS does not resolve between
   services in a stack. Named-network support is planned
-  ([ROADMAP.md](../ROADMAP.md#2-converge-engine--compose-coverage)).
+  ([#10](https://github.com/heckertobias/orkestra/issues/10)).
 - **Volumes:** only **bind mounts** (`type: bind`, `source:target[:ro]`) are applied. Named volumes
   and tmpfs mounts are currently dropped. Anonymous volumes are per-container and recreated with the
   container.
@@ -137,7 +137,7 @@ Two different layers touch a compose file, and they do **not** agree on every fi
 > ⚠️ So a stack can validate cleanly and deploy "successfully" while fields like `networks`,
 > named `volumes`, `depends_on`, or `healthcheck` have no effect. Full coverage (and failing loudly
 > on unimplemented fields) is tracked in
-> [ROADMAP.md](../ROADMAP.md#2-converge-engine--compose-coverage).
+> the [roadmap issues](https://github.com/heckertobias/orkestra/issues?q=is%3Aopen+label%3Aroadmap).
 
 ### `services.<name>` — currently applied
 
@@ -164,7 +164,7 @@ Two different layers touch a compose file, and they do **not** agree on every fi
 `extra_hosts`, `dns`, `read_only`, `security_opt`, `sysctls`, `ulimits`, `mem_limit` /
 `mem_reservation`, `cpus` / `cpu_shares`, `logging`, `stop_grace_period`, `init`, `tty` /
 `stdin_open`, `devices`, `build`, `network_mode`. See
-[ROADMAP.md](../ROADMAP.md#2-converge-engine--compose-coverage).
+the [roadmap issues](https://github.com/heckertobias/orkestra/issues?q=is%3Aopen+label%3Aroadmap).
 
 ### `services.<name>` — flagged by the validator (warning, ignored)
 
@@ -183,7 +183,7 @@ that is killed or drifts from its spec is brought back automatically on the next
 The `StatusReport`/`StackStatus` wire format carries per-stack running version, per-container state,
 and `drift_detected` / `drift_description` fields, which the Master stores in `agent_state`. Rich
 drift *reporting* to the UI (drift badges, human-readable drift descriptions) is only partially
-wired — see [ROADMAP.md](../ROADMAP.md).
+wired — see the [roadmap issues](https://github.com/heckertobias/orkestra/issues?q=is%3Aopen+label%3Aroadmap).
 
 ---
 

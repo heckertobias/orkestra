@@ -22,7 +22,7 @@ this release adds:
 - **Updates (foundation only):** `update_policies` / `available_updates` schema + queries, the
   `StatusReport.available_updates` wire format, and master-side persistence. Agent detection, apply
   RPCs, browser API and UI are **not** implemented yet — see
-  [ROADMAP.md](ROADMAP.md#1-update-system-fleet-updates).
+  [#9](https://github.com/heckertobias/orkestra/issues/9).
 - **Dev harness:** `run-dev.sh` (Postgres + Master + Vite, auto admin/token, optional DinD agents)
   and a `run-dev` skill.
 - **apt/dnf packages:** `.deb` + `.rpm` for `orkestra-master` and `orkestra-agent` (amd64/arm64)
@@ -47,7 +47,7 @@ this release adds:
 **M2 — Container Control & Web UI**
 - Agent-side Docker control: list, start, stop, restart, remove, image pull
 - Log/stats streaming wire format + Master↔Agent bridge scaffolding (not yet wired end-to-end —
-  see [ROADMAP.md](ROADMAP.md#3-live-streaming--logs-stats-exec))
+  see [#19](https://github.com/heckertobias/orkestra/issues/19), [#20](https://github.com/heckertobias/orkestra/issues/20), [#21](https://github.com/heckertobias/orkestra/issues/21))
 - React/TypeScript/Vite SPA, dark theme with lime-green accent, Server List and Server Detail pages
 
 **M3 — Compose Stacks & Desired-State Reconciliation**
@@ -55,7 +55,7 @@ this release adds:
 - Compose Converge Engine: spec-hash–based container identity, create/recreate/remove for a Compose
   subset (image, command, env, ports, restart, bind mounts, …). Named networks/volumes, `depends_on`
   ordering and healthchecks are not yet applied — see
-  [ROADMAP.md](ROADMAP.md#2-converge-engine--compose-coverage)
+  [#10](https://github.com/heckertobias/orkestra/issues/10), [#11](https://github.com/heckertobias/orkestra/issues/11), [#12](https://github.com/heckertobias/orkestra/issues/12)
 - Master reconciler pushes `ApplyDesiredState` to connected agents every 15s (and on mutations)
 - Stacks List and Stack Detail pages with version history and YAML viewer
 
