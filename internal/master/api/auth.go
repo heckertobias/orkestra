@@ -49,14 +49,17 @@ type AuthServiceHandler struct {
 	// oidcLogoutURL builds the provider's RP-initiated logout URL for an id_token hint,
 	// returning ("", false) when unavailable. May be nil (logout then stays local-only).
 	oidcLogoutURL func(idTokenHint string) (string, bool)
+	// secureCookies gates the Secure attribute on session cookies (ORKESTRA_SECURE_COOKIES).
+	secureCookies bool
 }
 
 // NewAuthServiceHandler constructs an AuthServiceHandler. reloadOIDC is invoked
 // after the OIDC config is persisted so the running provider picks up the change
 // without a Master restart; pass nil to skip live reloading. oidcLogoutURL builds the
 // RP-initiated logout URL used by Logout; pass nil to keep logout local-only.
-func NewAuthServiceHandler(db *pgxpool.Pool, kek []byte, setupToken *string, mailer *email.Mailer, reloadOIDC func(context.Context) error, oidcLogoutURL func(string) (string, bool)) *AuthServiceHandler {
-	return &AuthServiceHandler{db: db, q: store.New(db), kek: kek, setupToken: setupToken, mailer: mailer, reloadOIDC: reloadOIDC, oidcLogoutURL: oidcLogoutURL}
+// secureCookies gates the Secure attribute on session cookies (ORKESTRA_SECURE_COOKIES).
+func NewAuthServiceHandler(db *pgxpool.Pool, kek []byte, setupToken *string, mailer *email.Mailer, reloadOIDC func(context.Context) error, oidcLogoutURL func(string) (string, bool), secureCookies bool) *AuthServiceHandler {
+	return &AuthServiceHandler{db: db, q: store.New(db), kek: kek, setupToken: setupToken, mailer: mailer, reloadOIDC: reloadOIDC, oidcLogoutURL: oidcLogoutURL, secureCookies: secureCookies}
 }
 
 // AuditLogHTTPHandler returns audit log entries as JSON (GET /api/audit).
@@ -235,7 +238,7 @@ func (h *AuthServiceHandler) Login(ctx context.Context, req *connect.Request[ork
 		User:      userToProto(user, roles, bindings),
 		SessionId: sessionID,
 	})
-	masterauth.SetSessionCookie(resp.Header(), rawToken, expires)
+	masterauth.SetSessionCookie(resp.Header(), rawToken, expires, h.secureCookies)
 
 	h.auditAuth(ctx, &user, "auth.login", nil)
 	return resp, nil
@@ -262,7 +265,7 @@ func (h *AuthServiceHandler) Logout(ctx context.Context, _ *connect.Request[orke
 		h.auditAuth(ctx, &user, "auth.logout", nil)
 	}
 	resp := connect.NewResponse(&orkestraV1.LogoutResponse{PostLogoutUrl: postLogoutURL})
-	masterauth.ClearSessionCookie(resp.Header())
+	masterauth.ClearSessionCookie(resp.Header(), h.secureCookies)
 	return resp, nil
 }
 

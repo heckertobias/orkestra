@@ -184,6 +184,9 @@ services:
       ORKESTRA_AGENT_ADDR: "0.0.0.0:4440"
       ORKESTRA_UI_ADDR: "0.0.0.0:8080"
       ORKESTRA_LOG_LEVEL: info
+      # Session/OIDC cookies carry the Secure attribute by default (HTTPS only).
+      # Set to false ONLY for direct plain-HTTP access (local dev).
+      # ORKESTRA_SECURE_COOKIES: "true"
       # ORKESTRA_TLS_CERT: /tls/server.crt
       # ORKESTRA_TLS_KEY:  /tls/server.key
 
@@ -246,6 +249,8 @@ ORKESTRA_DATABASE_URL=postgres://orkestra:<password>@localhost:5432/orkestra?ssl
 ORKESTRA_AGENT_ADDR=0.0.0.0:4440
 ORKESTRA_UI_ADDR=0.0.0.0:8080
 ORKESTRA_MASTER_KEY_FILE=/etc/orkestra/master/master.key
+# Secure cookies are on by default; set false only for direct plain-HTTP access (local dev).
+# ORKESTRA_SECURE_COOKIES=true
 ```
 
 `/etc/orkestra/master/master.key` (KEK — stored separately, **not** in the env file):
@@ -281,7 +286,11 @@ Typical setup: the UI lives behind a public domain (e.g. `https://orkestra.examp
 the agent channel keeps its own port.
 
 - **UI (`8080`):** a reverse proxy (nginx/Traefik/Caddy) terminates Let's Encrypt on `443`
-  and forwards to `:8080`. Standard HTTPS.
+  and forwards to `:8080`. Standard HTTPS. Leave **`ORKESTRA_SECURE_COOKIES`** at its default
+  (`true`): the browser↔proxy leg is HTTPS, so session/OIDC cookies are set with the `Secure`
+  attribute even though the proxy→Master hop is plain HTTP. Only set it `false` when the UI is
+  reached directly over plain HTTP (local dev) — otherwise the browser drops the cookies and
+  login fails.
 - **Agent mTLS (`4440`):** must be reachable end-to-end. **Do not terminate TLS at the proxy** —
   agents pin the Master's *internal CA*, so a public-cert proxy would break the handshake.
   Either forward the port directly, or use a **TCP/SNI passthrough** (nginx `stream` with

@@ -259,6 +259,9 @@ export ORKESTRA_MASTER_KEY="$MASTER_KEY"
 export ORKESTRA_UI_ADDR="$UI_ADDR"
 export ORKESTRA_AGENT_ADDR="$AGENT_ADDR"
 export ORKESTRA_METRICS_ADDR="$METRICS_ADDR"
+# Dev serves the UI over plain HTTP (http://localhost:8080), so cookies must not be
+# Secure-only or the browser would drop them. Secure cookies default to on in production.
+export ORKESTRA_SECURE_COOKIES="${ORKESTRA_SECURE_COOKIES:-false}"
 
 echo "→ Starting Master (logs → $MASTER_LOG)"
 ./bin/orkestra-master --log-level debug > "$MASTER_LOG" 2>&1 &

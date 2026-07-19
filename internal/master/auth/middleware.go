@@ -163,26 +163,29 @@ func NewAuthInterceptor(publicProcedures map[string]bool) connect.UnaryIntercept
 
 // SetSessionCookie adds a Set-Cookie header to the provided header map.
 // Used with Connect response headers (which are http.Header, not http.ResponseWriter).
-func SetSessionCookie(h http.Header, rawToken string, expires time.Time) {
+// secure gates the Secure attribute (ORKESTRA_SECURE_COOKIES; disable only for plain-HTTP dev).
+func SetSessionCookie(h http.Header, rawToken string, expires time.Time, secure bool) {
 	c := &http.Cookie{
 		Name:     sessionCookie,
 		Value:    rawToken,
 		Path:     "/",
 		Expires:  expires,
 		HttpOnly: true,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	}
 	h.Add("Set-Cookie", c.String())
 }
 
 // ClearSessionCookie adds a clearing Set-Cookie header.
-func ClearSessionCookie(h http.Header) {
+func ClearSessionCookie(h http.Header, secure bool) {
 	c := &http.Cookie{
 		Name:     sessionCookie,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	}
 	h.Add("Set-Cookie", c.String())

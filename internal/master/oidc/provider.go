@@ -45,11 +45,16 @@ type Provider struct {
 
 	db  *store.Queries
 	kek []byte
+
+	// secureCookies gates the Secure attribute on the OIDC state and session cookies
+	// (ORKESTRA_SECURE_COOKIES). Immutable after construction, so no lock needed.
+	secureCookies bool
 }
 
 // New creates a Provider. Call Reload to initialize from DB.
-func New(db *store.Queries, kek []byte) *Provider {
-	return &Provider{db: db, kek: kek}
+// secureCookies gates the Secure attribute on the cookies this provider sets.
+func New(db *store.Queries, kek []byte, secureCookies bool) *Provider {
+	return &Provider{db: db, kek: kek, secureCookies: secureCookies}
 }
 
 // Reload reads the OIDC config from DB and (re)initialises the OIDC verifier.
@@ -188,6 +193,7 @@ func (p *Provider) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   int(stateTTL.Seconds()),
 		HttpOnly: true,
+		Secure:   p.secureCookies,
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.Redirect(w, r, oauth2cfg.AuthCodeURL(state), http.StatusFound)
@@ -216,7 +222,14 @@ func (p *Provider) CallbackHandler(q *store.Queries, sessionTTL time.Duration) h
 			http.Error(w, "invalid state", http.StatusBadRequest)
 			return
 		}
-		http.SetCookie(w, &http.Cookie{Name: stateCookieName, MaxAge: -1, Path: "/"})
+		http.SetCookie(w, &http.Cookie{
+			Name:     stateCookieName,
+			MaxAge:   -1,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   p.secureCookies,
+			SameSite: http.SameSiteLaxMode,
+		})
 
 		token, err := oauth2cfg.Exchange(r.Context(), r.URL.Query().Get("code"))
 		if err != nil {
@@ -308,7 +321,7 @@ func (p *Provider) CallbackHandler(q *store.Queries, sessionTTL time.Duration) h
 			return
 		}
 
-		masterauth.SetSessionCookie(w.Header(), rawToken, expires)
+		masterauth.SetSessionCookie(w.Header(), rawToken, expires, p.secureCookies)
 		http.Redirect(w, r, "/", http.StatusFound)
 	}
 }

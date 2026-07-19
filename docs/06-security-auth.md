@@ -89,8 +89,10 @@ happens at connection time (not CRL/OCSP polling). Revoked agents are immediatel
 - Passwords hashed with **argon2id** (params: memory=64MB, iterations=3, parallelism=4).
 - First-run setup: if no users exist, Master prints a one-time setup URL to stdout.
   Operator opens URL, sets admin username + password. URL expires after 30 minutes.
-- Sessions use a **random 256-bit session token** stored in an `httponly; Secure; SameSite=Strict`
-  cookie. Token is stored as SHA-256 in the `sessions` table (raw token never persisted).
+- Sessions use a **random 256-bit session token** stored in an `HttpOnly; SameSite=Lax` cookie.
+  The `Secure` attribute is added by default (`ORKESTRA_SECURE_COOKIES`, on unless explicitly
+  disabled for plain-HTTP local dev) — the same applies to the transient OIDC `state` cookie.
+  Token is stored as SHA-256 in the `sessions` table (raw token never persisted).
 - Session TTL: 8 hours idle, 7 days absolute (configurable).
 
 ### OIDC (Optional)
