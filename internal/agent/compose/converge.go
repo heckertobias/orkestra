@@ -7,18 +7,15 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/netip"
 	"sort"
 
-	cerrdefs "github.com/containerd/errdefs"
 	composetypes "github.com/compose-spec/compose-go/v2/types"
-	"github.com/docker/docker/api/types/container"
-	imagetypes "github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/api/types/strslice"
-	"github.com/docker/docker/client"
-	"github.com/docker/go-connections/nat"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/google/uuid"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
 )
 
 const (
@@ -89,7 +86,7 @@ func Stop(ctx context.Context, dc *client.Client, stackID string) error {
 	}
 	timeout := 10
 	for _, c := range list {
-		_ = dc.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout})
+		_, _ = dc.ContainerStop(ctx, c.ID, client.ContainerStopOptions{Timeout: &timeout})
 	}
 	return nil
 }
@@ -101,33 +98,33 @@ type containerSummary struct {
 }
 
 func listStackContainers(ctx context.Context, dc *client.Client, stackID string) ([]containerSummary, error) {
-	f := filters.NewArgs(
-		filters.Arg("label", managedLabel+"=true"),
-		filters.Arg("label", stackIDLabel+"="+stackID),
-	)
-	list, err := dc.ContainerList(ctx, container.ListOptions{All: true, Filters: f})
+	f := make(client.Filters).
+		Add("label", managedLabel+"=true").
+		Add("label", stackIDLabel+"="+stackID)
+	res, err := dc.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]containerSummary, 0, len(list))
-	for _, c := range list {
-		out = append(out, containerSummary{ID: c.ID, Labels: c.Labels, State: c.State})
+	out := make([]containerSummary, 0, len(res.Items))
+	for _, c := range res.Items {
+		out = append(out, containerSummary{ID: c.ID, Labels: c.Labels, State: string(c.State)})
 	}
 	return out, nil
 }
 
 func removeContainer(ctx context.Context, dc *client.Client, id string) error {
 	timeout := 10
-	_ = dc.ContainerStop(ctx, id, container.StopOptions{Timeout: &timeout})
-	return dc.ContainerRemove(ctx, id, container.RemoveOptions{Force: true})
+	_, _ = dc.ContainerStop(ctx, id, client.ContainerStopOptions{Timeout: &timeout})
+	_, err := dc.ContainerRemove(ctx, id, client.ContainerRemoveOptions{Force: true})
+	return err
 }
 
 func createAndStart(ctx context.Context, dc *client.Client, stackID, projectName, svcName string, svc composetypes.ServiceConfig, hash string) error {
 	labels := map[string]string{
-		managedLabel:  "true",
-		stackIDLabel:  stackID,
-		serviceLabel:  svcName,
-		specHashLabel: hash,
+		managedLabel:                 "true",
+		stackIDLabel:                 stackID,
+		serviceLabel:                 svcName,
+		specHashLabel:                hash,
 		"com.docker.compose.project": projectName,
 		"com.docker.compose.service": svcName,
 	}
@@ -135,7 +132,10 @@ func createAndStart(ctx context.Context, dc *client.Client, stackID, projectName
 		labels[k] = v
 	}
 
-	portBindings, exposedPorts := buildPorts(svc.Ports)
+	portBindings, exposedPorts, err := buildPorts(svc.Ports)
+	if err != nil {
+		return err
+	}
 
 	env := make([]string, 0, len(svc.Environment))
 	for k, v := range svc.Environment {
@@ -151,12 +151,12 @@ func createAndStart(ctx context.Context, dc *client.Client, stackID, projectName
 		return err
 	}
 
-	var cmd, entrypoint strslice.StrSlice
+	var cmd, entrypoint []string
 	if len(svc.Command) > 0 {
-		cmd = strslice.StrSlice(svc.Command)
+		cmd = svc.Command
 	}
 	if len(svc.Entrypoint) > 0 {
-		entrypoint = strslice.StrSlice(svc.Entrypoint)
+		entrypoint = svc.Entrypoint
 	}
 
 	cfg := &container.Config{
@@ -174,17 +174,23 @@ func createAndStart(ctx context.Context, dc *client.Client, stackID, projectName
 		RestartPolicy: toRestartPolicy(svc.Restart),
 		Binds:         buildBinds(svc.Volumes),
 		Privileged:    svc.Privileged,
-		CapAdd:        strslice.StrSlice(svc.CapAdd),
-		CapDrop:       strslice.StrSlice(svc.CapDrop),
+		CapAdd:        svc.CapAdd,
+		CapDrop:       svc.CapDrop,
 	}
 	netCfg := &network.NetworkingConfig{}
 
 	name := projectName + "-" + svcName + "-" + uuid.NewString()[:8]
-	resp, err := dc.ContainerCreate(ctx, cfg, hostCfg, netCfg, nil, name)
+	resp, err := dc.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config:           cfg,
+		HostConfig:       hostCfg,
+		NetworkingConfig: netCfg,
+		Name:             name,
+	})
 	if err != nil {
 		return fmt.Errorf("ContainerCreate: %w", err)
 	}
-	return dc.ContainerStart(ctx, resp.ID, container.StartOptions{})
+	_, err = dc.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{})
+	return err
 }
 
 // ensureImage makes the image available locally before a container is created, honoring the
@@ -209,7 +215,7 @@ func ensureImage(ctx context.Context, dc *client.Client, ref, pullPolicy string)
 	}
 
 	slog.Info("pulling image", "image", ref, "pull_policy", pullPolicy)
-	rc, err := dc.ImagePull(ctx, ref, imagetypes.PullOptions{})
+	rc, err := dc.ImagePull(ctx, ref, client.ImagePullOptions{})
 	if err != nil {
 		return fmt.Errorf("pull image %s: %w", ref, err)
 	}
@@ -266,24 +272,32 @@ func sortedServices(proj *composetypes.Project) []string {
 	return names
 }
 
-func buildPorts(ports []composetypes.ServicePortConfig) (nat.PortMap, nat.PortSet) {
-	portMap := make(nat.PortMap)
-	portSet := make(nat.PortSet)
+func buildPorts(ports []composetypes.ServicePortConfig) (network.PortMap, network.PortSet, error) {
+	portMap := make(network.PortMap)
+	portSet := make(network.PortSet)
 	for _, p := range ports {
 		proto := p.Protocol
 		if proto == "" {
 			proto = "tcp"
 		}
-		port := nat.Port(fmt.Sprintf("%d/%s", p.Target, proto))
+		port, err := network.ParsePort(fmt.Sprintf("%d/%s", p.Target, proto))
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid port %d/%s: %w", p.Target, proto, err)
+		}
 		portSet[port] = struct{}{}
 		if p.Published != "" && p.Published != "0" {
-			portMap[port] = append(portMap[port], nat.PortBinding{
-				HostIP:   p.HostIP,
-				HostPort: p.Published,
-			})
+			binding := network.PortBinding{HostPort: p.Published}
+			if p.HostIP != "" {
+				addr, err := netip.ParseAddr(p.HostIP)
+				if err != nil {
+					return nil, nil, fmt.Errorf("invalid host_ip %q: %w", p.HostIP, err)
+				}
+				binding.HostIP = addr
+			}
+			portMap[port] = append(portMap[port], binding)
 		}
 	}
-	return portMap, portSet
+	return portMap, portSet, nil
 }
 
 func toRestartPolicy(policy string) container.RestartPolicy {

@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/docker/docker/api/types/container"
-	dockerevents "github.com/docker/docker/api/types/events"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/container"
+	dockerevents "github.com/moby/moby/api/types/events"
+	"github.com/moby/moby/client"
 )
 
 // Client wraps the Docker Engine client.
@@ -35,30 +33,30 @@ func (c *Client) RawClient() *client.Client { return c.dc }
 
 // ContainerInfo is a summary of a single container.
 type ContainerInfo struct {
-	ID          string
-	Names       []string
-	Image       string
-	ImageID     string
-	State       string // running | exited | paused | ...
-	Status      string // "Up 3 hours"
+	ID           string
+	Names        []string
+	Image        string
+	ImageID      string
+	State        string // running | exited | paused | ...
+	Status       string // "Up 3 hours"
 	RestartCount int
-	Labels      map[string]string
+	Labels       map[string]string
 }
 
 // ListContainers returns all managed containers (all states).
 func (c *Client) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
-	containers, err := c.dc.ContainerList(ctx, container.ListOptions{All: true})
+	res, err := c.dc.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		return nil, fmt.Errorf("list containers: %w", err)
 	}
-	out := make([]ContainerInfo, 0, len(containers))
-	for _, ct := range containers {
+	out := make([]ContainerInfo, 0, len(res.Items))
+	for _, ct := range res.Items {
 		out = append(out, ContainerInfo{
 			ID:      ct.ID,
 			Names:   ct.Names,
 			Image:   ct.Image,
 			ImageID: ct.ImageID,
-			State:   ct.State,
+			State:   string(ct.State),
 			Status:  ct.Status,
 			Labels:  ct.Labels,
 		})
@@ -68,34 +66,42 @@ func (c *Client) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
 
 // InspectContainer returns detailed info for a single container.
 func (c *Client) InspectContainer(ctx context.Context, id string) (container.InspectResponse, error) {
-	return c.dc.ContainerInspect(ctx, id)
+	res, err := c.dc.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+	if err != nil {
+		return container.InspectResponse{}, err
+	}
+	return res.Container, nil
 }
 
 // StartContainer starts a stopped container.
 func (c *Client) StartContainer(ctx context.Context, id string) error {
-	return c.dc.ContainerStart(ctx, id, container.StartOptions{})
+	_, err := c.dc.ContainerStart(ctx, id, client.ContainerStartOptions{})
+	return err
 }
 
 // StopContainer stops a running container (10 second grace period).
 func (c *Client) StopContainer(ctx context.Context, id string) error {
 	timeout := 10
-	return c.dc.ContainerStop(ctx, id, container.StopOptions{Timeout: &timeout})
+	_, err := c.dc.ContainerStop(ctx, id, client.ContainerStopOptions{Timeout: &timeout})
+	return err
 }
 
 // RestartContainer restarts a container.
 func (c *Client) RestartContainer(ctx context.Context, id string) error {
 	timeout := 10
-	return c.dc.ContainerRestart(ctx, id, container.StopOptions{Timeout: &timeout})
+	_, err := c.dc.ContainerRestart(ctx, id, client.ContainerRestartOptions{Timeout: &timeout})
+	return err
 }
 
 // RemoveContainer forcibly removes a container.
 func (c *Client) RemoveContainer(ctx context.Context, id string) error {
-	return c.dc.ContainerRemove(ctx, id, container.RemoveOptions{Force: true})
+	_, err := c.dc.ContainerRemove(ctx, id, client.ContainerRemoveOptions{Force: true})
+	return err
 }
 
 // PullImage pulls an image from a registry and streams the progress to w.
 func (c *Client) PullImage(ctx context.Context, ref string, w io.Writer) error {
-	reader, err := c.dc.ImagePull(ctx, ref, image.PullOptions{})
+	reader, err := c.dc.ImagePull(ctx, ref, client.ImagePullOptions{})
 	if err != nil {
 		return fmt.Errorf("image pull: %w", err)
 	}
@@ -105,7 +111,7 @@ func (c *Client) PullImage(ctx context.Context, ref string, w io.Writer) error {
 }
 
 // Logs streams container logs. The caller is responsible for closing the returned ReadCloser.
-func (c *Client) Logs(ctx context.Context, id string, opts container.LogsOptions) (io.ReadCloser, error) {
+func (c *Client) Logs(ctx context.Context, id string, opts client.ContainerLogsOptions) (io.ReadCloser, error) {
 	if !opts.ShowStdout && !opts.ShowStderr {
 		opts.ShowStdout = true
 		opts.ShowStderr = true
@@ -115,14 +121,14 @@ func (c *Client) Logs(ctx context.Context, id string, opts container.LogsOptions
 
 // Events subscribes to Docker events and sends them on the returned channel.
 func (c *Client) Events(ctx context.Context) (<-chan dockerevents.Message, <-chan error) {
-	f := filters.NewArgs()
-	f.Add("type", "container")
-	return c.dc.Events(ctx, dockerevents.ListOptions{Filters: f})
+	f := make(client.Filters).Add("type", "container")
+	res := c.dc.Events(ctx, client.EventsListOptions{Filters: f})
+	return res.Messages, res.Err
 }
 
 // DockerVersion returns the Docker server version string.
 func (c *Client) DockerVersion(ctx context.Context) (string, error) {
-	v, err := c.dc.ServerVersion(ctx)
+	v, err := c.dc.ServerVersion(ctx, client.ServerVersionOptions{})
 	if err != nil {
 		return "", err
 	}
