@@ -18,7 +18,8 @@ type Client struct {
 
 // New creates a dockerctl Client connected to the local Docker daemon.
 func New() (*Client, error) {
-	dc, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	// API-version negotiation is enabled by default in moby/moby/client.
+	dc, err := client.New(client.FromEnv)
 	if err != nil {
 		return nil, fmt.Errorf("create docker client: %w", err)
 	}
