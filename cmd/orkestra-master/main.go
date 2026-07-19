@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -47,10 +48,17 @@ func main() {
 		metricsAddr = flag.String("metrics-addr", envOrDefault("ORKESTRA_METRICS_ADDR", "0.0.0.0:9090"), "Prometheus metrics listen address")
 		dbURL       = flag.String("db", envOrDefault("ORKESTRA_DATABASE_URL", ""), "PostgreSQL DSN (required)")
 		logLevel    = flag.String("log-level", envOrDefault("ORKESTRA_LOG_LEVEL", "info"), "Log level (debug|info|warn|error)")
+
+		secureCookies = flag.Bool("secure-cookies", envBoolOrDefault("ORKESTRA_SECURE_COOKIES", true),
+			"Set the Secure attribute on session/OIDC cookies (disable only for plain-HTTP local dev)")
 	)
 	flag.Parse()
 
 	setupLogger(*logLevel)
+
+	if !*secureCookies {
+		slog.Warn("ORKESTRA_SECURE_COOKIES is disabled — cookies are sent over plain HTTP; use only for local dev")
+	}
 
 	slog.Info("orkestra master starting",
 		"version", version.Version,
@@ -201,7 +209,7 @@ func main() {
 	}
 	oidcRedirectURL := fmt.Sprintf("http://%s/auth/oidc/callback", oidcCallbackAddr)
 	oidcPostLogoutURL := fmt.Sprintf("http://%s/login", oidcCallbackAddr)
-	oidcProvider := masteroidc.New(q, kek)
+	oidcProvider := masteroidc.New(q, kek, *secureCookies)
 	if err := oidcProvider.Reload(ctx, oidcRedirectURL, oidcPostLogoutURL); err != nil {
 		slog.Warn("OIDC provider init failed (non-fatal)", "err", err)
 	}
@@ -226,7 +234,7 @@ func main() {
 
 	// --- AuthService ---
 	reloadOIDC := func(ctx context.Context) error { return oidcProvider.Reload(ctx, oidcRedirectURL, oidcPostLogoutURL) }
-	authHandler := masterapi.NewAuthServiceHandler(db, kek, &setupToken, mailer, reloadOIDC, oidcProvider.LogoutURL)
+	authHandler := masterapi.NewAuthServiceHandler(db, kek, &setupToken, mailer, reloadOIDC, oidcProvider.LogoutURL, *secureCookies)
 	authPath, authSvcHandler := orkestrav1connect.NewAuthServiceHandler(authHandler, connectOpts...)
 
 	// --- Session middleware ---
@@ -333,6 +341,17 @@ func setupLogger(level string) {
 func envOrDefault(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return def
+}
+
+// envBoolOrDefault parses a boolean env var (strconv.ParseBool semantics), falling back to def
+// when unset or unparseable.
+func envBoolOrDefault(key string, def bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
 	}
 	return def
 }
