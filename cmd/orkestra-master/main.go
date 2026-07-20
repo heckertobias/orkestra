@@ -28,17 +28,17 @@ import (
 	"github.com/heckertobias/orkestra/internal/master/pki"
 	masterreconciler "github.com/heckertobias/orkestra/internal/master/reconciler"
 	"github.com/heckertobias/orkestra/internal/master/store"
-	"github.com/heckertobias/orkestra/internal/shared/version"
 	"github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1/orkestrav1connect"
+	"github.com/heckertobias/orkestra/internal/shared/version"
 	webui "github.com/heckertobias/orkestra/web"
 )
 
 // publicProcedures lists Connect RPC procedures that do not require a session.
 var publicProcedures = map[string]bool{
-	orkestrav1connect.AuthServiceLoginProcedure:                true,
-	orkestrav1connect.AuthServiceRequestPasswordResetProcedure: true,
+	orkestrav1connect.AuthServiceLoginProcedure:                  true,
+	orkestrav1connect.AuthServiceRequestPasswordResetProcedure:   true,
 	orkestrav1connect.AuthServiceResetPasswordWithTokenProcedure: true,
-	orkestrav1connect.AuthServiceConfirmEmailChangeProcedure:    true,
+	orkestrav1connect.AuthServiceConfirmEmailChangeProcedure:     true,
 }
 
 func main() {
@@ -49,10 +49,15 @@ func main() {
 		dbURL       = flag.String("db", envOrDefault("ORKESTRA_DATABASE_URL", ""), "PostgreSQL DSN (required)")
 		logLevel    = flag.String("log-level", envOrDefault("ORKESTRA_LOG_LEVEL", "info"), "Log level (debug|info|warn|error)")
 
+		publicURL = flag.String("public-url", envOrDefault("ORKESTRA_PUBLIC_URL", ""),
+			"Public base URL the UI is reached at (e.g. https://orkestra.example.com); used for the OIDC redirect, setup link, and email links")
+
 		secureCookies = flag.Bool("secure-cookies", envBoolOrDefault("ORKESTRA_SECURE_COOKIES", true),
 			"Set the Secure attribute on session/OIDC cookies (disable only for plain-HTTP local dev)")
 	)
 	flag.Parse()
+
+	*publicURL = normalizePublicURL(*publicURL)
 
 	setupLogger(*logLevel)
 
@@ -117,7 +122,10 @@ func main() {
 			os.Exit(1)
 		}
 		setupToken = tok
-		uiURL := fmt.Sprintf("http://%s", *uiAddr)
+		uiURL := *publicURL
+		if uiURL == "" {
+			uiURL = fmt.Sprintf("http://%s", *uiAddr)
+		}
 		slog.Warn("FIRST RUN: no users configured — open setup URL to create the admin account",
 			"url", fmt.Sprintf("%s/login?setup=%s", uiURL, setupToken))
 	}
@@ -200,15 +208,23 @@ func main() {
 	go rec.Run(ctx)
 
 	// --- OIDC Provider ---
-	// The callback host must be browser-reachable: a 0.0.0.0 bind address is valid
-	// for listening but never as a redirect target (Safari rejects it outright), so
-	// normalise it to localhost.
-	oidcCallbackAddr := *uiAddr
-	if host, port, err := net.SplitHostPort(oidcCallbackAddr); err == nil && (host == "" || host == "0.0.0.0" || host == "::") {
-		oidcCallbackAddr = net.JoinHostPort("localhost", port)
+	// The redirect/post-logout URLs must be browser-reachable and — for OIDC — match the URI
+	// registered at the IdP exactly. When a public base URL is configured, derive them from it
+	// (this is required behind TLS, where the scheme is https). Otherwise fall back to the local
+	// bind address: a 0.0.0.0 bind is valid for listening but never as a redirect target (Safari
+	// rejects it outright), so normalise it to localhost.
+	var oidcRedirectURL, oidcPostLogoutURL string
+	if *publicURL != "" {
+		oidcRedirectURL = *publicURL + "/auth/oidc/callback"
+		oidcPostLogoutURL = *publicURL + "/login"
+	} else {
+		oidcCallbackAddr := *uiAddr
+		if host, port, err := net.SplitHostPort(oidcCallbackAddr); err == nil && (host == "" || host == "0.0.0.0" || host == "::") {
+			oidcCallbackAddr = net.JoinHostPort("localhost", port)
+		}
+		oidcRedirectURL = fmt.Sprintf("http://%s/auth/oidc/callback", oidcCallbackAddr)
+		oidcPostLogoutURL = fmt.Sprintf("http://%s/login", oidcCallbackAddr)
 	}
-	oidcRedirectURL := fmt.Sprintf("http://%s/auth/oidc/callback", oidcCallbackAddr)
-	oidcPostLogoutURL := fmt.Sprintf("http://%s/login", oidcCallbackAddr)
 	oidcProvider := masteroidc.New(q, kek, *secureCookies)
 	if err := oidcProvider.Reload(ctx, oidcRedirectURL, oidcPostLogoutURL); err != nil {
 		slog.Warn("OIDC provider init failed (non-fatal)", "err", err)
@@ -234,7 +250,7 @@ func main() {
 
 	// --- AuthService ---
 	reloadOIDC := func(ctx context.Context) error { return oidcProvider.Reload(ctx, oidcRedirectURL, oidcPostLogoutURL) }
-	authHandler := masterapi.NewAuthServiceHandler(db, kek, &setupToken, mailer, reloadOIDC, oidcProvider.LogoutURL, *secureCookies)
+	authHandler := masterapi.NewAuthServiceHandler(db, kek, &setupToken, mailer, reloadOIDC, oidcProvider.LogoutURL, *publicURL, *secureCookies)
 	authPath, authSvcHandler := orkestrav1connect.NewAuthServiceHandler(authHandler, connectOpts...)
 
 	// --- Session middleware ---
@@ -354,6 +370,12 @@ func envBoolOrDefault(key string, def bool) bool {
 		}
 	}
 	return def
+}
+
+// normalizePublicURL trims surrounding whitespace and any trailing slash from the configured
+// public base URL so callers can append paths like "/auth/oidc/callback" without doubling up.
+func normalizePublicURL(u string) string {
+	return strings.TrimRight(strings.TrimSpace(u), "/")
 }
 
 // agentTLSSANs builds the SAN lists for the agent-listener server cert. localhost and the

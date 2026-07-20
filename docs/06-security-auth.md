@@ -114,6 +114,11 @@ auth:
         "orkestra-view":   "viewer"
 ```
 
+The redirect URI registered at the IdP must be `<ORKESTRA_PUBLIC_URL>/auth/oidc/callback`. Behind
+TLS, set **`ORKESTRA_PUBLIC_URL`** (e.g. `https://orkestra.example.com`) so the Master builds an
+`https://` `redirect_uri` that matches the registration — otherwise it falls back to `http://` and
+the IdP rejects the mismatch. See `docs/08-deployment.md` § "Behind a domain / reverse proxy".
+
 OIDC login flow:
 1. Browser clicks "Login with SSO" → Master redirects to OIDC provider.
 2. Provider authenticates user, redirects back with `code`.
