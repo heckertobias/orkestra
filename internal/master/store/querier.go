@@ -36,6 +36,7 @@ type Querier interface {
 	GetSMTPConfig(ctx context.Context) (SmtpConfig, error)
 	GetSecret(ctx context.Context, id string) (Secret, error)
 	GetServer(ctx context.Context, id string) (Server, error)
+	GetServerConfig(ctx context.Context) (ServerConfig, error)
 	GetSession(ctx context.Context, arg GetSessionParams) (Session, error)
 	GetSessionByID(ctx context.Context, id string) (Session, error)
 	GetStack(ctx context.Context, id string) (Stack, error)
@@ -105,6 +106,7 @@ type Querier interface {
 	UpsertOIDCConfig(ctx context.Context, arg UpsertOIDCConfigParams) (OidcConfig, error)
 	UpsertPasswordPolicy(ctx context.Context, arg UpsertPasswordPolicyParams) (PasswordPolicy, error)
 	UpsertSMTPConfig(ctx context.Context, arg UpsertSMTPConfigParams) (SmtpConfig, error)
+	UpsertServerConfig(ctx context.Context, arg UpsertServerConfigParams) (ServerConfig, error)
 }
 
 var _ Querier = (*Queries)(nil)

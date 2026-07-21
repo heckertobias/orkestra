@@ -45,6 +45,10 @@ service AuthService {
   rpc GetSMTPConfig(AuthEmpty)                  returns (SMTPConfig);
   rpc UpdateSMTPConfig(UpdateSMTPConfigRequest) returns (SMTPConfig);
 
+  // Server config (admin)
+  rpc GetServerConfig(AuthEmpty)                    returns (ServerConfig);
+  rpc UpdateServerConfig(UpdateServerConfigRequest) returns (ServerConfig);
+
   // Enrollment tokens (admin/operator)
   rpc ListEnrollmentTokens(AuthEmpty)                      returns (ListEnrollmentTokensResponse);
   rpc CreateEnrollmentToken(CreateEnrollmentTokenRequest)  returns (EnrollmentToken);
@@ -174,6 +178,17 @@ message UpdateSMTPConfigRequest {
   string from_address = 6;
   string public_url   = 7;
   bool   starttls     = 8;
+}
+
+// ServerConfig holds deployment-wide settings set in the UI. public_url is the
+// browser-facing base URL and, when set, overrides ORKESTRA_PUBLIC_URL for the
+// OIDC redirect, email links, and the setup link.
+message ServerConfig {
+  string public_url = 1; // browser-facing base URL (e.g. https://orkestra.example.com); empty = use env/default
+}
+
+message UpdateServerConfigRequest {
+  string public_url = 1;
 }
 
 message RoleBinding {

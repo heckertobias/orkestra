@@ -122,10 +122,10 @@ func main() {
 			os.Exit(1)
 		}
 		setupToken = tok
-		uiURL := *publicURL
-		if uiURL == "" {
-			uiURL = fmt.Sprintf("http://%s", *uiAddr)
-		}
+		// First run: no admin exists yet, so there is no UI-set public URL to read — resolve from
+		// ORKESTRA_PUBLIC_URL, else the bind address (0.0.0.0 normalised to localhost, scheme from
+		// secure-cookies).
+		uiURL := masterapi.StartupBaseURL("", *publicURL, *uiAddr, *secureCookies)
 		slog.Warn("FIRST RUN: no users configured — open setup URL to create the admin account",
 			"url", fmt.Sprintf("%s/login?setup=%s", uiURL, setupToken))
 	}
@@ -209,25 +209,23 @@ func main() {
 
 	// --- OIDC Provider ---
 	// The redirect/post-logout URLs must be browser-reachable and — for OIDC — match the URI
-	// registered at the IdP exactly. When a public base URL is configured, derive them from it
-	// (this is required behind TLS, where the scheme is https). Otherwise fall back to the local
-	// bind address: a 0.0.0.0 bind is valid for listening but never as a redirect target (Safari
-	// rejects it outright), so normalise it to localhost.
-	var oidcRedirectURL, oidcPostLogoutURL string
-	if *publicURL != "" {
-		oidcRedirectURL = *publicURL + "/auth/oidc/callback"
-		oidcPostLogoutURL = *publicURL + "/login"
-	} else {
-		oidcCallbackAddr := *uiAddr
-		if host, port, err := net.SplitHostPort(oidcCallbackAddr); err == nil && (host == "" || host == "0.0.0.0" || host == "::") {
-			oidcCallbackAddr = net.JoinHostPort("localhost", port)
+	// registered at the IdP exactly. resolveOIDCURLs derives them from the current public base URL
+	// (admin-set server_config.public_url → ORKESTRA_PUBLIC_URL → bind address). It is re-resolved
+	// on every reload so a UI change to the public URL takes effect without a Master restart.
+	resolveOIDCURLs := func(ctx context.Context) (redirect, postLogout string) {
+		dbPublicURL := ""
+		if sc, err := q.GetServerConfig(ctx); err == nil {
+			dbPublicURL = sc.PublicUrl
 		}
-		oidcRedirectURL = fmt.Sprintf("http://%s/auth/oidc/callback", oidcCallbackAddr)
-		oidcPostLogoutURL = fmt.Sprintf("http://%s/login", oidcCallbackAddr)
+		base := masterapi.StartupBaseURL(dbPublicURL, *publicURL, *uiAddr, *secureCookies)
+		return base + "/auth/oidc/callback", base + "/login"
 	}
 	oidcProvider := masteroidc.New(q, kek, *secureCookies)
-	if err := oidcProvider.Reload(ctx, oidcRedirectURL, oidcPostLogoutURL); err != nil {
-		slog.Warn("OIDC provider init failed (non-fatal)", "err", err)
+	{
+		redirect, postLogout := resolveOIDCURLs(ctx)
+		if err := oidcProvider.Reload(ctx, redirect, postLogout); err != nil {
+			slog.Warn("OIDC provider init failed (non-fatal)", "err", err)
+		}
 	}
 
 	// --- Connect interceptors ---
@@ -249,7 +247,10 @@ func main() {
 	mailer := masteremail.New(q, kek)
 
 	// --- AuthService ---
-	reloadOIDC := func(ctx context.Context) error { return oidcProvider.Reload(ctx, oidcRedirectURL, oidcPostLogoutURL) }
+	reloadOIDC := func(ctx context.Context) error {
+		redirect, postLogout := resolveOIDCURLs(ctx)
+		return oidcProvider.Reload(ctx, redirect, postLogout)
+	}
 	authHandler := masterapi.NewAuthServiceHandler(db, kek, &setupToken, mailer, reloadOIDC, oidcProvider.LogoutURL, *publicURL, *secureCookies)
 	authPath, authSvcHandler := orkestrav1connect.NewAuthServiceHandler(authHandler, connectOpts...)
 

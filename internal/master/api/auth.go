@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/mail"
 	"strings"
@@ -973,6 +974,46 @@ func (h *AuthServiceHandler) UpdateSMTPConfig(ctx context.Context, req *connect.
 	}), nil
 }
 
+// GetServerConfig returns the deployment-wide server configuration (admin only).
+func (h *AuthServiceHandler) GetServerConfig(ctx context.Context, _ *connect.Request[orkestraV1.AuthEmpty]) (*connect.Response[orkestraV1.ServerConfig], error) {
+	if err := requireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
+	cfg, err := h.q.GetServerConfig(ctx)
+	if err != nil {
+		// No row yet — return empty (falls back to ORKESTRA_PUBLIC_URL / bind address).
+		return connect.NewResponse(&orkestraV1.ServerConfig{}), nil
+	}
+	return connect.NewResponse(&orkestraV1.ServerConfig{PublicUrl: cfg.PublicUrl}), nil
+}
+
+// UpdateServerConfig saves the deployment-wide server configuration (admin only). Changing the
+// public URL re-initialises the live OIDC provider so its redirect URI reflects the new base URL
+// without a Master restart.
+func (h *AuthServiceHandler) UpdateServerConfig(ctx context.Context, req *connect.Request[orkestraV1.UpdateServerConfigRequest]) (*connect.Response[orkestraV1.ServerConfig], error) {
+	if err := requireRole(ctx, "admin"); err != nil {
+		return nil, err
+	}
+	publicURL := strings.TrimRight(strings.TrimSpace(req.Msg.PublicUrl), "/")
+
+	cfg, err := h.q.UpsertServerConfig(ctx, store.UpsertServerConfigParams{
+		PublicUrl: publicURL,
+		UpdatedAt: time.Now().UnixMilli(),
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("save server config: %w", err))
+	}
+
+	// Re-initialise the live provider so the OIDC redirect URI picks up the new public URL
+	// without a restart (mirrors UpdateOIDCConfig).
+	if h.reloadOIDC != nil {
+		if err := h.reloadOIDC(ctx); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload oidc provider: %w", err))
+		}
+	}
+	return connect.NewResponse(&orkestraV1.ServerConfig{PublicUrl: cfg.PublicUrl}), nil
+}
+
 // GetOIDCConfig returns the current OIDC configuration.
 func (h *AuthServiceHandler) GetOIDCConfig(ctx context.Context, _ *connect.Request[orkestraV1.AuthEmpty]) (*connect.Response[orkestraV1.OIDCConfig], error) {
 	if err := requireRole(ctx, "admin"); err != nil {
@@ -1396,38 +1437,74 @@ func (h *AuthServiceHandler) validatePassword(ctx context.Context, pw string) er
 
 // publicURL derives the base URL for email links, in order of precedence:
 //  1. the SMTP-specific PublicUrl (admin-configured, most specific),
-//  2. the configured public base URL (ORKESTRA_PUBLIC_URL),
-//  3. the request Host, with scheme taken from X-Forwarded-Proto (default http) so links behind
-//     a TLS-terminating reverse proxy resolve to https,
-//  4. a local default.
+//  2. the admin-set global public URL (server_config.public_url),
+//  3. the configured public base URL (ORKESTRA_PUBLIC_URL),
+//  4. the request Host, with scheme taken from X-Forwarded-Proto (or, absent that, the
+//     secure-cookies setting) so links behind a TLS-terminating reverse proxy resolve to https,
+//  5. a local default.
 func (h *AuthServiceHandler) publicURL(header http.Header) string {
-	cfg, err := h.q.GetSMTPConfig(context.Background())
-	if err == nil && cfg.PublicUrl != "" {
+	if cfg, err := h.q.GetSMTPConfig(context.Background()); err == nil && cfg.PublicUrl != "" {
 		return cfg.PublicUrl
 	}
-	return publicURLFallback(h.publicBaseURL, header)
+	dbPublicURL := ""
+	if sc, err := h.q.GetServerConfig(context.Background()); err == nil {
+		dbPublicURL = sc.PublicUrl
+	}
+	return requestBaseURL(dbPublicURL, h.publicBaseURL, header, h.secureCookies)
 }
 
-// publicURLFallback derives a base URL when no SMTP-specific PublicUrl is set: it prefers the
+// requestBaseURL resolves the base URL for request-scoped links (email) when no SMTP-specific
+// PublicUrl is set: the admin-set global public URL (server_config.public_url), then the
 // configured public base URL (ORKESTRA_PUBLIC_URL), then the request Host with the scheme from
-// X-Forwarded-Proto (default http, so links behind a TLS proxy resolve to https), then a local
-// default.
-func publicURLFallback(publicBaseURL string, header http.Header) string {
-	if publicBaseURL != "" {
-		return publicBaseURL
+// X-Forwarded-Proto (or, absent that, the secure-cookies setting), then a local default.
+func requestBaseURL(dbPublicURL, envPublicURL string, header http.Header, secureCookies bool) string {
+	if dbPublicURL != "" {
+		return strings.TrimRight(strings.TrimSpace(dbPublicURL), "/")
+	}
+	if envPublicURL != "" {
+		return strings.TrimRight(strings.TrimSpace(envPublicURL), "/")
 	}
 	proto := header.Get("X-Forwarded-Proto")
 	if proto == "" {
-		proto = "http"
+		proto = SchemeForSecureCookies(secureCookies)
 	}
 	host := header.Get("X-Forwarded-Host")
 	if host == "" {
 		host = header.Get("Host")
 	}
 	if host == "" {
-		return "http://localhost:8080"
+		return SchemeForSecureCookies(secureCookies) + "://localhost:8080"
 	}
 	return proto + "://" + host
+}
+
+// SchemeForSecureCookies returns the URL scheme implied by the secure-cookies setting: https when
+// cookies carry the Secure attribute (the browser is talking TLS), otherwise http. It lets URLs
+// built without a request (OIDC redirect, setup link) and the request fallback share one signal.
+func SchemeForSecureCookies(secureCookies bool) string {
+	if secureCookies {
+		return "https"
+	}
+	return "http"
+}
+
+// StartupBaseURL resolves the browser-facing base URL for links built without a request in hand
+// (the OIDC redirect/post-logout URLs and the first-run setup link): the admin-set global public
+// URL (server_config.public_url), then ORKESTRA_PUBLIC_URL, then the bind address with a
+// 0.0.0.0/:: host normalised to localhost (never a valid redirect target) and the scheme from the
+// secure-cookies setting. The returned URL has no trailing slash so callers can append paths.
+func StartupBaseURL(dbPublicURL, envPublicURL, bindAddr string, secureCookies bool) string {
+	if v := strings.TrimRight(strings.TrimSpace(dbPublicURL), "/"); v != "" {
+		return v
+	}
+	if v := strings.TrimRight(strings.TrimSpace(envPublicURL), "/"); v != "" {
+		return v
+	}
+	addr := bindAddr
+	if host, port, err := net.SplitHostPort(addr); err == nil && (host == "" || host == "0.0.0.0" || host == "::") {
+		addr = net.JoinHostPort("localhost", port)
+	}
+	return SchemeForSecureCookies(secureCookies) + "://" + addr
 }
 
 // generateResetToken returns a (rawToken, tokenHash) pair for password-reset/invite flows.
