@@ -539,14 +539,13 @@ interface SMTPForm {
   username: string
   password: string
   fromAddress: string
-  publicUrl: string
   starttls: boolean
 }
 
 function SMTPTab() {
   const { toast } = useToast()
   const [form, setForm] = useState<SMTPForm>({
-    enabled: false, host: '', port: 587, username: '', password: '', fromAddress: '', publicUrl: '', starttls: true,
+    enabled: false, host: '', port: 587, username: '', password: '', fromAddress: '', starttls: true,
   })
   const [showPw, setShowPw] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -562,7 +561,6 @@ function SMTPTab() {
         port:        Number(d.port ?? 587),
         username:    String(d.username ?? ''),
         fromAddress: String(d.fromAddress ?? d.from_address ?? ''),
-        publicUrl:   String(d.publicUrl ?? d.public_url ?? ''),
         starttls:    Boolean(d.starttls ?? true),
       })))
       .catch(() => {})
@@ -580,7 +578,6 @@ function SMTPTab() {
         username:     form.username,
         password:     form.password || undefined,
         from_address: form.fromAddress,
-        public_url:   form.publicUrl,
         starttls:     form.starttls,
       })
       if (!res.ok) throw new Error(await res.text())
@@ -641,11 +638,6 @@ function SMTPTab() {
       <Field label="From address">
         <input value={form.fromAddress} onChange={e => setForm(f => ({ ...f, fromAddress: e.target.value }))}
           className="input" placeholder="orkestra <no-reply@example.com>" />
-      </Field>
-
-      <Field label="Public URL" hint="Base URL for links in emails. Overrides the general Public URL for emails only; leave blank to use it (e.g. https://orkestra.example.com).">
-        <input value={form.publicUrl} onChange={e => setForm(f => ({ ...f, publicUrl: e.target.value }))}
-          className="input" placeholder="https://orkestra.example.com" />
       </Field>
 
       <div className="flex items-center justify-between p-4 rounded-lg border"

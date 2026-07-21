@@ -53,7 +53,7 @@ func (q *Queries) GetPasswordResetTokenByHash(ctx context.Context, tokenHash str
 }
 
 const getSMTPConfig = `-- name: GetSMTPConfig :one
-SELECT id, enabled, host, port, username, password_enc, from_address, public_url, starttls, updated_at FROM smtp_config LIMIT 1
+SELECT id, enabled, host, port, username, password_enc, from_address, starttls, updated_at FROM smtp_config LIMIT 1
 `
 
 func (q *Queries) GetSMTPConfig(ctx context.Context) (SmtpConfig, error) {
@@ -67,7 +67,6 @@ func (q *Queries) GetSMTPConfig(ctx context.Context) (SmtpConfig, error) {
 		&i.Username,
 		&i.PasswordEnc,
 		&i.FromAddress,
-		&i.PublicUrl,
 		&i.Starttls,
 		&i.UpdatedAt,
 	)
@@ -201,8 +200,8 @@ func (q *Queries) UpsertPasswordPolicy(ctx context.Context, arg UpsertPasswordPo
 }
 
 const upsertSMTPConfig = `-- name: UpsertSMTPConfig :one
-INSERT INTO smtp_config (id, enabled, host, port, username, password_enc, from_address, public_url, starttls, updated_at)
-VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO smtp_config (id, enabled, host, port, username, password_enc, from_address, starttls, updated_at)
+VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (id) DO UPDATE SET
     enabled      = excluded.enabled,
     host         = excluded.host,
@@ -210,10 +209,9 @@ ON CONFLICT (id) DO UPDATE SET
     username     = excluded.username,
     password_enc = excluded.password_enc,
     from_address = excluded.from_address,
-    public_url   = excluded.public_url,
     starttls     = excluded.starttls,
     updated_at   = excluded.updated_at
-RETURNING id, enabled, host, port, username, password_enc, from_address, public_url, starttls, updated_at
+RETURNING id, enabled, host, port, username, password_enc, from_address, starttls, updated_at
 `
 
 type UpsertSMTPConfigParams struct {
@@ -223,7 +221,6 @@ type UpsertSMTPConfigParams struct {
 	Username    string `json:"username"`
 	PasswordEnc string `json:"password_enc"`
 	FromAddress string `json:"from_address"`
-	PublicUrl   string `json:"public_url"`
 	Starttls    bool   `json:"starttls"`
 	UpdatedAt   int64  `json:"updated_at"`
 }
@@ -236,7 +233,6 @@ func (q *Queries) UpsertSMTPConfig(ctx context.Context, arg UpsertSMTPConfigPara
 		arg.Username,
 		arg.PasswordEnc,
 		arg.FromAddress,
-		arg.PublicUrl,
 		arg.Starttls,
 		arg.UpdatedAt,
 	)
@@ -249,7 +245,6 @@ func (q *Queries) UpsertSMTPConfig(ctx context.Context, arg UpsertSMTPConfigPara
 		&i.Username,
 		&i.PasswordEnc,
 		&i.FromAddress,
-		&i.PublicUrl,
 		&i.Starttls,
 		&i.UpdatedAt,
 	)

@@ -303,9 +303,6 @@ the agent channel keeps its own port.
        otherwise the bind address with the scheme from `ORKESTRA_SECURE_COOKIES` (`https` by
        default). The first-run setup link runs before any admin exists, so it always uses this
        env/fallback layer.
-
-  An admin-set SMTP *Public URL* (*Settings → Email*) still overrides all of the above for email
-  links only.
 - **Agent mTLS (`4440`):** must be reachable end-to-end. **Do not terminate TLS at the proxy** —
   agents pin the Master's *internal CA*, so a public-cert proxy would break the handshake.
   Either forward the port directly, or use a **TCP/SNI passthrough** (nginx `stream` with

@@ -217,7 +217,6 @@ type SmtpConfig struct {
 	Username    string `json:"username"`
 	PasswordEnc string `json:"password_enc"`
 	FromAddress string `json:"from_address"`
-	PublicUrl   string `json:"public_url"`
 	Starttls    bool   `json:"starttls"`
 	UpdatedAt   int64  `json:"updated_at"`
 }

@@ -50,8 +50,8 @@ type AuthServiceHandler struct {
 	// oidcLogoutURL builds the provider's RP-initiated logout URL for an id_token hint,
 	// returning ("", false) when unavailable. May be nil (logout then stays local-only).
 	oidcLogoutURL func(idTokenHint string) (string, bool)
-	// publicBaseURL is the configured public base URL (ORKESTRA_PUBLIC_URL); used as the
-	// fallback for email links when no SMTP-specific PublicUrl is set. Empty when unconfigured.
+	// publicBaseURL is the configured public base URL (ORKESTRA_PUBLIC_URL); the startup default
+	// used when no admin-set server_config.public_url is present. Empty when unconfigured.
 	publicBaseURL string
 	// secureCookies gates the Secure attribute on session cookies (ORKESTRA_SECURE_COOKIES).
 	secureCookies bool
@@ -62,7 +62,7 @@ type AuthServiceHandler struct {
 // without a Master restart; pass nil to skip live reloading. oidcLogoutURL builds the
 // RP-initiated logout URL used by Logout; pass nil to keep logout local-only.
 // secureCookies gates the Secure attribute on session cookies (ORKESTRA_SECURE_COOKIES).
-// publicBaseURL (ORKESTRA_PUBLIC_URL) is the fallback base URL for email links; pass "" when unset.
+// publicBaseURL (ORKESTRA_PUBLIC_URL) is the startup-default public base URL; pass "" when unset.
 func NewAuthServiceHandler(db *pgxpool.Pool, kek []byte, setupToken *string, mailer *email.Mailer, reloadOIDC func(context.Context) error, oidcLogoutURL func(string) (string, bool), publicBaseURL string, secureCookies bool) *AuthServiceHandler {
 	return &AuthServiceHandler{db: db, q: store.New(db), kek: kek, setupToken: setupToken, mailer: mailer, reloadOIDC: reloadOIDC, oidcLogoutURL: oidcLogoutURL, publicBaseURL: publicBaseURL, secureCookies: secureCookies}
 }
@@ -916,7 +916,6 @@ func (h *AuthServiceHandler) GetSMTPConfig(ctx context.Context, _ *connect.Reque
 		Port:        int32(cfg.Port),
 		Username:    cfg.Username,
 		FromAddress: cfg.FromAddress,
-		PublicUrl:   cfg.PublicUrl,
 		Starttls:    cfg.Starttls,
 		// password not returned (write-only)
 	}), nil
@@ -956,7 +955,6 @@ func (h *AuthServiceHandler) UpdateSMTPConfig(ctx context.Context, req *connect.
 		Username:    r.Username,
 		PasswordEnc: passwordEnc,
 		FromAddress: r.FromAddress,
-		PublicUrl:   r.PublicUrl,
 		Starttls:    r.Starttls,
 		UpdatedAt:   time.Now().UnixMilli(),
 	})
@@ -969,7 +967,6 @@ func (h *AuthServiceHandler) UpdateSMTPConfig(ctx context.Context, req *connect.
 		Port:        int32(cfg.Port),
 		Username:    cfg.Username,
 		FromAddress: cfg.FromAddress,
-		PublicUrl:   cfg.PublicUrl,
 		Starttls:    cfg.Starttls,
 	}), nil
 }
@@ -1436,16 +1433,12 @@ func (h *AuthServiceHandler) validatePassword(ctx context.Context, pw string) er
 }
 
 // publicURL derives the base URL for email links, in order of precedence:
-//  1. the SMTP-specific PublicUrl (admin-configured, most specific),
-//  2. the admin-set global public URL (server_config.public_url),
-//  3. the configured public base URL (ORKESTRA_PUBLIC_URL),
-//  4. the request Host, with scheme taken from X-Forwarded-Proto (or, absent that, the
+//  1. the admin-set global public URL (server_config.public_url),
+//  2. the configured public base URL (ORKESTRA_PUBLIC_URL),
+//  3. the request Host, with scheme taken from X-Forwarded-Proto (or, absent that, the
 //     secure-cookies setting) so links behind a TLS-terminating reverse proxy resolve to https,
-//  5. a local default.
+//  4. a local default.
 func (h *AuthServiceHandler) publicURL(header http.Header) string {
-	if cfg, err := h.q.GetSMTPConfig(context.Background()); err == nil && cfg.PublicUrl != "" {
-		return cfg.PublicUrl
-	}
 	dbPublicURL := ""
 	if sc, err := h.q.GetServerConfig(context.Background()); err == nil {
 		dbPublicURL = sc.PublicUrl
@@ -1453,10 +1446,10 @@ func (h *AuthServiceHandler) publicURL(header http.Header) string {
 	return requestBaseURL(dbPublicURL, h.publicBaseURL, header, h.secureCookies)
 }
 
-// requestBaseURL resolves the base URL for request-scoped links (email) when no SMTP-specific
-// PublicUrl is set: the admin-set global public URL (server_config.public_url), then the
-// configured public base URL (ORKESTRA_PUBLIC_URL), then the request Host with the scheme from
-// X-Forwarded-Proto (or, absent that, the secure-cookies setting), then a local default.
+// requestBaseURL resolves the base URL for request-scoped links (email): the admin-set global
+// public URL (server_config.public_url), then the configured public base URL
+// (ORKESTRA_PUBLIC_URL), then the request Host with the scheme from X-Forwarded-Proto (or, absent
+// that, the secure-cookies setting), then a local default.
 func requestBaseURL(dbPublicURL, envPublicURL string, header http.Header, secureCookies bool) string {
 	if dbPublicURL != "" {
 		return strings.TrimRight(strings.TrimSpace(dbPublicURL), "/")

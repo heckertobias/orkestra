@@ -159,24 +159,26 @@ message PasswordPolicy {
 }
 
 message SMTPConfig {
+  reserved 6;
+  reserved "public_url"; // removed: use the deployment-wide ServerConfig.public_url instead
   bool   enabled      = 1;
   string host         = 2;
   int32  port         = 3;
   string username     = 4;
   // password not returned; write-only via UpdateSMTPConfig
   string from_address = 5;
-  string public_url   = 6; // base URL for email links (e.g. https://orkestra.example.com)
   bool   starttls     = 7;
 }
 
 message UpdateSMTPConfigRequest {
+  reserved 7;
+  reserved "public_url"; // removed: use the deployment-wide ServerConfig.public_url instead
   bool   enabled      = 1;
   string host         = 2;
   int32  port         = 3;
   string username     = 4;
   string password     = 5; // write-only; leave blank to keep existing
   string from_address = 6;
-  string public_url   = 7;
   bool   starttls     = 8;
 }
 
