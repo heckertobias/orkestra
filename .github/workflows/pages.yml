@@ -1,0 +1,152 @@
+name: Pages (apt/rpm repo)
+
+# Build the signed apt + rpm repository from the published releases' .deb/.rpm assets and
+# deploy it to GitHub Pages via the Actions-native pipeline (upload-pages-artifact +
+# deploy-pages) — fast and controllable, unlike the legacy branch build which could stall.
+#
+# Stateless: the whole repo is rebuilt from every published release each run, so there is no
+# gh-pages branch state to drift or corrupt.
+#
+# Requires two repo secrets:
+#   GPG_PRIVATE_KEY  — ASCII-armored private signing key
+#   GPG_PASSPHRASE   — its passphrase (empty string if the key has none)
+# One-time: set Pages "Build and deployment > Source" to "GitHub Actions".
+
+on:
+  # After a release publishes its .deb/.rpm assets.
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  # Manual re-run / seed the Actions-based Pages deployment.
+  workflow_dispatch:
+
+permissions:
+  contents: read # list + download releases
+  pages: write # deploy to Pages
+  id-token: write # OIDC for deploy-pages
+
+# One in-flight Pages deployment at a time; let a running deploy finish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    name: build & deploy apt/rpm repo
+    # Only for a successful release, or a manual dispatch.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Install repo tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y reprepro createrepo-c
+
+      - name: Import GPG signing key
+        id: gpg
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Download all released packages (with retry)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Rebuild statelessly from every published (non-draft, non-prerelease) release.
+          # gh occasionally returns a transient 5xx, so retry each download with backoff.
+          mkdir -p dist-pkgs
+          tags=$(gh release list --repo "${GITHUB_REPOSITORY}" \
+            --json tagName,isDraft,isPrerelease \
+            --jq '.[] | select(.isDraft==false and .isPrerelease==false) | .tagName')
+          for tag in $tags; do
+            for attempt in 1 2 3 4 5; do
+              if gh release download "$tag" --repo "${GITHUB_REPOSITORY}" \
+                  --pattern '*.deb' --pattern '*.rpm' --dir dist-pkgs --clobber; then
+                break
+              fi
+              echo "download $tag attempt ${attempt} failed; retrying in $((attempt * 5))s"
+              sleep $((attempt * 5))
+            done
+          done
+          ls -la dist-pkgs
+          ls dist-pkgs/*.deb dist-pkgs/*.rpm >/dev/null 2>&1 \
+            || { echo "no packages downloaded after retries"; exit 1; }
+
+      - name: Build signed apt repository (reprepro)
+        env:
+          KEYID: ${{ steps.gpg.outputs.keyid }}
+        run: |
+          mkdir -p site/apt/conf
+          cat > site/apt/conf/distributions <<EOF
+          Origin: orkestra
+          Label: orkestra
+          Suite: stable
+          Codename: stable
+          Architectures: amd64 arm64
+          Components: main
+          Description: orkestra apt repository
+          SignWith: ${KEYID}
+          EOF
+          for deb in dist-pkgs/*.deb; do
+            # reprepro allows one version per package per distribution; a rejected
+            # downgrade is fine — users get the highest version.
+            reprepro -b site/apt includedeb stable "$deb" || true
+          done
+
+      - name: Build signed rpm repository (createrepo_c)
+        env:
+          KEYID: ${{ steps.gpg.outputs.keyid }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          mkdir -p site/rpm/packages
+          cp -f dist-pkgs/*.rpm site/rpm/packages/ 2>/dev/null || true
+          createrepo_c --update site/rpm
+          gpg --batch --yes --pinentry-mode loopback --passphrase "${GPG_PASSPHRASE}" \
+              --detach-sign --armor site/rpm/repodata/repomd.xml
+          # Packages are not individually GPG-signed; trust comes from the signed
+          # repo metadata (repomd.xml.asc) → repo_gpgcheck=1, gpgcheck=0.
+          cat > site/rpm/orkestra.repo <<'EOF'
+          [orkestra]
+          name=orkestra
+          baseurl=https://heckertobias.github.io/orkestra/rpm
+          enabled=1
+          gpgcheck=0
+          repo_gpgcheck=1
+          gpgkey=https://heckertobias.github.io/orkestra/orkestra.asc
+          EOF
+
+      - name: Assemble Pages site (public key, index, .nojekyll)
+        env:
+          KEYID: ${{ steps.gpg.outputs.keyid }}
+        run: |
+          # apt's signed-by keyring wants the binary (dearmored) key; dnf's gpgkey
+          # wants the ASCII-armored one. Publish both.
+          gpg --export "${KEYID}" > site/orkestra.gpg
+          gpg --armor --export "${KEYID}" > site/orkestra.asc
+          touch site/.nojekyll
+          cat > site/index.html <<'EOF'
+          <!doctype html><meta charset="utf-8"><title>orkestra package repository</title>
+          <body style="font-family:system-ui;max-width:52rem;margin:3rem auto;padding:0 1rem;line-height:1.5">
+          <h1>orkestra package repository</h1>
+          <h2>Debian / Ubuntu (apt)</h2>
+          <pre>curl -fsSL https://heckertobias.github.io/orkestra/orkestra.gpg | sudo tee /usr/share/keyrings/orkestra.gpg >/dev/null
+          echo "deb [signed-by=/usr/share/keyrings/orkestra.gpg] https://heckertobias.github.io/orkestra/apt stable main" | sudo tee /etc/apt/sources.list.d/orkestra.list
+          sudo apt update &amp;&amp; sudo apt install orkestra-agent   # or orkestra-master</pre>
+          <h2>Fedora / RHEL (dnf)</h2>
+          <pre>sudo dnf config-manager --add-repo https://heckertobias.github.io/orkestra/rpm/orkestra.repo
+          sudo dnf install orkestra-agent   # or orkestra-master</pre>
+          </body>
+          EOF
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ./site
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
