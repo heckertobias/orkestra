@@ -1,35 +1,35 @@
 Package: orkestra-agent
-Version: 0.1.0
+Version: 0.1.1
 Architecture: amd64
 Architecture-Variant: amd64v1
 Maintainer: Tobias Hecker <heckertobias@googlemail.com>
-Installed-Size: 15685
+Installed-Size: 15761
 Recommends: docker.io
 Homepage: https://github.com/heckertobias/orkestra
 Priority: optional
 Section: 
-Filename: pool/main/o/orkestra-agent/orkestra-agent_0.1.0_amd64.deb
-Size: 6154618
-SHA256: 9e72d95e7fe309c67934468bb2f6bdfcb6c8d978a9071e0dd563901d421fd257
-SHA1: a193e3a521f2119151fe6c3c324afcbcf70d05a9
-MD5sum: ff3358b2516fbc75c921e224e9fe8296
+Filename: pool/main/o/orkestra-agent/orkestra-agent_0.1.1_amd64.deb
+Size: 6179016
+SHA256: b65b6bdb48e482b41af047cab294e0add72b0c802b13cc9d54cb55bbd10c13f4
+SHA1: f17154b320f6890da44b4ffdb077d68e894e07a1
+MD5sum: 63233e8fef0ba713fd3bab563c64cb05
 Description: orkestra Agent — reconciles Docker Compose stacks on a host toward the
  Master's desired state over an outbound mTLS gRPC stream.
 
 Package: orkestra-master
-Version: 0.1.0
+Version: 0.1.1
 Architecture: amd64
 Architecture-Variant: amd64v1
 Maintainer: Tobias Hecker <heckertobias@googlemail.com>
-Installed-Size: 20049
+Installed-Size: 20113
 Homepage: https://github.com/heckertobias/orkestra
 Priority: optional
 Section: 
-Filename: pool/main/o/orkestra-master/orkestra-master_0.1.0_amd64.deb
-Size: 7243806
-SHA256: 68c0f97ad3c90ee0a8dd6aa742e3aef26f8cfa66aaafb5db43d8e303a2309986
-SHA1: 1adf79c7b155138226f393fafc01c8fb4b74ad6b
-MD5sum: f15937e519db9de393b141f18f2b9111
+Filename: pool/main/o/orkestra-master/orkestra-master_0.1.1_amd64.deb
+Size: 7254830
+SHA256: 4248f64e1253b0e0ff0ef8cef7b329e9574eb8686c058814456e80672e54854e
+SHA1: 8885ee2e3fd8e0964f211590edf718f68d14fdae
+MD5sum: b920c6d487116106632f8aa21b990bfd
 Description: orkestra Master — control plane for centrally managed, self-healing
  Docker Compose stacks across Linux servers.
 

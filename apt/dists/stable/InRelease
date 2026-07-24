@@ -5,44 +5,44 @@ Origin: orkestra
 Label: orkestra
 Suite: stable
 Codename: stable
-Date: Sat, 18 Jul 2026 06:08:18 UTC
+Date: Fri, 24 Jul 2026 16:02:14 UTC
 Architectures: amd64 arm64
 Components: main
 Description: orkestra apt repository
 MD5Sum:
- a738d200a904e3af1eef68dc4e4e2d55 1280 main/binary-amd64/Packages
- 2b4dd2954f8c384c0cedd72bdecf790b 652 main/binary-amd64/Packages.gz
+ d5be0bb17aeab5966adcb4ad94fd951b 1280 main/binary-amd64/Packages
+ 0687bc46cf7af56b73dcdab27684416d 650 main/binary-amd64/Packages.gz
  6bab36fa691c57e60c184866edaa9b80 122 main/binary-amd64/Release
- e8a2d3cefa6e10171ebe85f91a01ba2a 1220 main/binary-arm64/Packages
- 8a5b1a927f24a00148fedbf444198ceb 638 main/binary-arm64/Packages.gz
+ 578a9bdd9b7d8b816a4d24e64a51d79f 1220 main/binary-arm64/Packages
+ c7cfd38bfc12d616006d6d7a5bec9c5f 637 main/binary-arm64/Packages.gz
  ed3b4bd29273284ec5a5b5876b30d3cf 122 main/binary-arm64/Release
 SHA1:
- 028b301e0b2859ebe70e059f2ed3c06fe4745f4a 1280 main/binary-amd64/Packages
- fbae4ab48d932e5083ec2ed161c13654b6c2be11 652 main/binary-amd64/Packages.gz
+ b35fb398cf4790ffc328074f03078b79e27b765e 1280 main/binary-amd64/Packages
+ 2f5761f5efefc1358553f0674b89c310a74563b1 650 main/binary-amd64/Packages.gz
  237ad188cd4b4bb591482d7855781527c80bfc59 122 main/binary-amd64/Release
- bbac434191c2f819e975473c521391e4700e4417 1220 main/binary-arm64/Packages
- f733aa61d2b152d5ed79fd35e7cef20bf8934170 638 main/binary-arm64/Packages.gz
+ f8c68d511a1b63ade9caa9e92a5407dcd66c4816 1220 main/binary-arm64/Packages
+ 2e59272358ee71f47031f282bdf08973775351f7 637 main/binary-arm64/Packages.gz
  6596cdb52d522db3ac92368b85d031aab4a9f6fe 122 main/binary-arm64/Release
 SHA256:
- 32399d2c5e676ea50bfb9c420e2fe3a0fa3cf154978437bcb8f20335925133eb 1280 main/binary-amd64/Packages
- 2ce5e70a913e6efdc64417583db0b28b45868794206ec715c73d9aabb3738bfe 652 main/binary-amd64/Packages.gz
+ a21d5eb22251c88fb8bf51f1d41e9d2ab2b24a28bed3dd358e83e498633d2c79 1280 main/binary-amd64/Packages
+ 753027dfcf6910c6fd335a0a88dbc4a79c28181317a4e4f8a94784dd8b0ee8fa 650 main/binary-amd64/Packages.gz
  f940cba72e9103778ce6a41ebff87a107ee8ef634c42dd02f58011fed099b9f0 122 main/binary-amd64/Release
- c098dfa5ba67390915567cb7fd522f52d4a2294739e0d0c2fd328395b1532dc3 1220 main/binary-arm64/Packages
- e1facf7d5431e9eb090ce9da5492e8f275f527689fe8c67ce48e60ac1db41c55 638 main/binary-arm64/Packages.gz
+ fbf650586ccb1ffbfeec00a7eb0db0d6cf93499f339d77856cd8b1e5a95f66d9 1220 main/binary-arm64/Packages
+ 5b009b31d6d95861196b012533524204cf5f038a9b4c7a53aecfe73eae644441 637 main/binary-arm64/Packages.gz
  b15bb8ff99f0b0c146cd6a1142d08f3a1bfa08ffb493d354ae6cef5617ad25f8 122 main/binary-arm64/Release
 -----BEGIN PGP SIGNATURE-----
 
-iQIzBAEBCgAdFiEExhkepq9N5hCTCCrbH9pHq5TrpHIFAmpbGFIACgkQH9pHq5Tr
-pHJJgxAAvlpmicZ0ixBc0NUhWDfX2QYRB/umSmZ3Qlm0BqV+7JwIIQiRI0V34FAr
-fLpSuE1GtPHthNu33zdn0zExC66/m1uOo1NyKZDVfranjrnb9GcxJyp+Rt95p25B
-m+p9SLFOqdlHuMfrTsatptaqj4/KE0lW/T+nP1KLjJ16V4Obg5yXvCN3VSVeftyQ
-7HwdbnurGjGeA+y2rFStGTJS0zUXPEL10/weyn/OiTfk43B/CT4jadxj5N6n4xBQ
-Djtot7e0sf2X0Kl3FXv7KKc+7OuUSJGUnLnF01rwHcf/m5+xGfa5Q1UKTWWhTWAF
-JTTbS9Ohd21Mv1/zcq4Tc54W74O3a4UBeJNbLCp7qJfsxd4RRR3G0RrFV27p0/18
-8SfZP6SNQwdZow6XrGhjKOTSICJOg5BwLALe/bXek32T/Xs29cApDQpsA4/K4X2u
-GMLBi3V8GuScWWHACLYDPN5+ge8MMsYs6bbdliTGOISwYOEeKk9U6+Y0vod8s03R
-gN10itie/zmiI60SsjTn2Zx1leEjgxgfq2sErfYUfTxtjxTh8qtLXAi9XS2hqL8o
-APaaF05nhkTcTD20rCJ3ETL/Jpvrw/YMNzaxwPRjGyAKvx8alV774OVtdPTTFA1T
-lxDYOlDLBv3ePKGhnZRVQEy9rGttTa8eO0cNo5oFr70ZGjqjxWQ=
-=K89y
+iQIzBAEBCgAdFiEExhkepq9N5hCTCCrbH9pHq5TrpHIFAmpjjIYACgkQH9pHq5Tr
+pHKXAxAA4E72VuNU1p8dj59sHAHDTa8HmR9t11R5ETTLO2EQxPTMtoIvrsmTGx8J
+IJRJmHc/mgzMhCr7rp33VVcfDa3Dg9fUiVKmeP+/sYJVXR6lEEEqkCtL6JDqwx5c
+yDDMOcbz5F41hnCymEhVYttNsmT7CxmpzDl128IeGUpZQ95gp+B7l0f5X7U4GpEE
+4PAilwGSteSKw3WqAeLvFA/NtCPKbkZdZtDLX4T60JY3L8CZDuE/+zWa5ng5Hlzy
+f7N+WSGBkUlWf1TY4VszMxGPCRX/ZpYQr/fJAuM9auNHuvkqqfyDJdMLzRsK8U1M
+ld+QevYod6KPsZ5URnHU0VLAdO1vzQ4OjygwGPbtju4y72OKxxg5jZ6vRgF/eD3s
+jbMe5W1z1NdlDIwL/R8x1cA49+uPZWyJaVYT2qkGuB90WBbM+5d8UkGnBoJP9ZNX
+FGaQ+Y/f2gBXrtu1DmF1HiuOabRubDoZ/WfZRE4U6aMCLByZKOLEluLqGNTpPfN8
+SxAqJYDTswHYgTwuH5Ru9dJul24KiPgbQWnr2pJgL2QmLQQIf/ZR+bJlzr1dzuJ5
+fjW4kmm/AjoJLkdN1t61cgynYBy9QiV/jn3vKEMwNAqNp18e+GGEpNsrfRklobgD
+7Yx+FcCx9yRzpQRO+oYn1QW3WG9bzlXwxptRIa5BBy53XPPsKtc=
+=B7nf
 -----END PGP SIGNATURE-----
