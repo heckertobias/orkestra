@@ -291,6 +291,18 @@ the agent channel keeps its own port.
   attribute even though the proxy→Master hop is plain HTTP. Only set it `false` when the UI is
   reached directly over plain HTTP (local dev) — otherwise the browser drops the cookies and
   login fails.
+- **Public URL:** the browser-facing base URL (e.g. `https://orkestra.example.com`) the Master uses
+  to build the OIDC `redirect_uri`, the first-run setup link, and password-reset/invite email links.
+  Behind TLS this is **required for OIDC** — the registered redirect URI must match
+  `<public URL>/auth/oidc/callback`; without it the Master falls back to the bind address over
+  `http://`, which mismatches the IdP registration. Set it either way, in order of precedence:
+    1. **UI** — *Settings → General → Public URL* (admin, stored in `server_config`). Applied live:
+       a change re-initialises the OIDC provider without a Master restart.
+    2. **`ORKESTRA_PUBLIC_URL`** — the startup default when no UI value is set (declarative/GitOps).
+    3. **Fallback** — for email links the proxy's `X-Forwarded-Proto`/`X-Forwarded-Host` headers;
+       otherwise the bind address with the scheme from `ORKESTRA_SECURE_COOKIES` (`https` by
+       default). The first-run setup link runs before any admin exists, so it always uses this
+       env/fallback layer.
 - **Agent mTLS (`4440`):** must be reachable end-to-end. **Do not terminate TLS at the proxy** —
   agents pin the Master's *internal CA*, so a public-cert proxy would break the handshake.
   Either forward the port directly, or use a **TCP/SNI passthrough** (nginx `stream` with
@@ -305,6 +317,7 @@ the agent channel keeps its own port.
 # Master env
 ORKESTRA_AGENT_ADDR=0.0.0.0:4440
 ORKESTRA_UI_ADDR=0.0.0.0:8080
+ORKESTRA_PUBLIC_URL=https://orkestra.example.com   # startup default; overridable in the UI
 ORKESTRA_AGENT_TLS_SANS=orkestra.example.com
 ```
 

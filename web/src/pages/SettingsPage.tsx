@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Key, Shield, Plus, Trash2, Eye, EyeOff, Copy, Lock, Mail } from 'lucide-react'
+import { Key, Shield, Plus, Trash2, Eye, EyeOff, Copy, Lock, Mail, Globe } from 'lucide-react'
 import { useToast } from '@/components/ui/toast-context'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -35,15 +35,16 @@ function connectPost(procedure: string, body: unknown) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function SettingsPage() {
-  const [tab, setTab] = useState<'oidc' | 'policy' | 'smtp' | 'apikeys'>('oidc')
+  const [tab, setTab] = useState<'server' | 'oidc' | 'policy' | 'smtp' | 'apikeys'>('server')
 
   return (
     <div>
       <h1 className="text-xl font-semibold mb-1" style={{ color: 'var(--text)' }}>Settings</h1>
-      <p className="mb-6" style={{ color: 'var(--text-muted)' }}>SSO, email, password policy, and API keys.</p>
+      <p className="mb-6" style={{ color: 'var(--text-muted)' }}>Server, SSO, email, password policy, and API keys.</p>
 
       <div className="flex gap-1 mb-6 border-b" style={{ borderColor: 'var(--border)' }}>
         {([
+          ['server',  'General',          Globe],
           ['oidc',    'SSO / OIDC',      Shield],
           ['policy',  'Password Policy',  Lock],
           ['smtp',    'Email / SMTP',     Mail],
@@ -64,11 +65,63 @@ export function SettingsPage() {
         ))}
       </div>
 
+      {tab === 'server'  && <ServerTab />}
       {tab === 'oidc'    && <OIDCTab />}
       {tab === 'policy'  && <PasswordPolicyTab />}
       {tab === 'smtp'    && <SMTPTab />}
       {tab === 'apikeys' && <APIKeysTab />}
     </div>
+  )
+}
+
+// ─── Server / General Tab ─────────────────────────────────────────────────────
+
+function ServerTab() {
+  const { toast } = useToast()
+  const [publicUrl, setPublicUrl] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    connectPost('GetServerConfig', {})
+      .then(r => r.json())
+      .then(d => setPublicUrl(String(d.publicUrl ?? d.public_url ?? '')))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      const res = await connectPost('UpdateServerConfig', { public_url: publicUrl })
+      if (!res.ok) throw new Error(await res.text())
+      toast('Server configuration saved', 'success')
+    } catch (err) {
+      toast(String(err), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (loading) return <Skeleton lines={3} />
+
+  return (
+    <form onSubmit={handleSave} className="max-w-lg space-y-5">
+      <Field
+        label="Public URL"
+        hint="Browser-facing base URL of this orkestra instance (e.g. https://orkestra.example.com). Used for the OIDC redirect, email links, and the setup link. Overrides the ORKESTRA_PUBLIC_URL env var; leave blank to use it. Behind TLS the OIDC redirect URI registered at the IdP must be this URL plus /auth/oidc/callback."
+      >
+        <input value={publicUrl} onChange={e => setPublicUrl(e.target.value)}
+          className="input" placeholder="https://orkestra.example.com" />
+      </Field>
+
+      <button type="submit" disabled={busy}
+        className="px-4 py-2 rounded text-sm font-medium disabled:opacity-50"
+        style={{ backgroundColor: 'var(--accent)', color: '#0d1117' }}>
+        {busy ? 'Saving…' : 'Save configuration'}
+      </button>
+    </form>
   )
 }
 
@@ -486,14 +539,13 @@ interface SMTPForm {
   username: string
   password: string
   fromAddress: string
-  publicUrl: string
   starttls: boolean
 }
 
 function SMTPTab() {
   const { toast } = useToast()
   const [form, setForm] = useState<SMTPForm>({
-    enabled: false, host: '', port: 587, username: '', password: '', fromAddress: '', publicUrl: '', starttls: true,
+    enabled: false, host: '', port: 587, username: '', password: '', fromAddress: '', starttls: true,
   })
   const [showPw, setShowPw] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -509,7 +561,6 @@ function SMTPTab() {
         port:        Number(d.port ?? 587),
         username:    String(d.username ?? ''),
         fromAddress: String(d.fromAddress ?? d.from_address ?? ''),
-        publicUrl:   String(d.publicUrl ?? d.public_url ?? ''),
         starttls:    Boolean(d.starttls ?? true),
       })))
       .catch(() => {})
@@ -527,7 +578,6 @@ function SMTPTab() {
         username:     form.username,
         password:     form.password || undefined,
         from_address: form.fromAddress,
-        public_url:   form.publicUrl,
         starttls:     form.starttls,
       })
       if (!res.ok) throw new Error(await res.text())
@@ -588,11 +638,6 @@ function SMTPTab() {
       <Field label="From address">
         <input value={form.fromAddress} onChange={e => setForm(f => ({ ...f, fromAddress: e.target.value }))}
           className="input" placeholder="orkestra <no-reply@example.com>" />
-      </Field>
-
-      <Field label="Public URL" hint="Base URL for links in emails (e.g. https://orkestra.example.com).">
-        <input value={form.publicUrl} onChange={e => setForm(f => ({ ...f, publicUrl: e.target.value }))}
-          className="input" placeholder="https://orkestra.example.com" />
       </Field>
 
       <div className="flex items-center justify-between p-4 rounded-lg border"

@@ -45,6 +45,10 @@ service AuthService {
   rpc GetSMTPConfig(AuthEmpty)                  returns (SMTPConfig);
   rpc UpdateSMTPConfig(UpdateSMTPConfigRequest) returns (SMTPConfig);
 
+  // Server config (admin)
+  rpc GetServerConfig(AuthEmpty)                    returns (ServerConfig);
+  rpc UpdateServerConfig(UpdateServerConfigRequest) returns (ServerConfig);
+
   // Enrollment tokens (admin/operator)
   rpc ListEnrollmentTokens(AuthEmpty)                      returns (ListEnrollmentTokensResponse);
   rpc CreateEnrollmentToken(CreateEnrollmentTokenRequest)  returns (EnrollmentToken);
@@ -155,25 +159,38 @@ message PasswordPolicy {
 }
 
 message SMTPConfig {
+  reserved 6;
+  reserved "public_url"; // removed: use the deployment-wide ServerConfig.public_url instead
   bool   enabled      = 1;
   string host         = 2;
   int32  port         = 3;
   string username     = 4;
   // password not returned; write-only via UpdateSMTPConfig
   string from_address = 5;
-  string public_url   = 6; // base URL for email links (e.g. https://orkestra.example.com)
   bool   starttls     = 7;
 }
 
 message UpdateSMTPConfigRequest {
+  reserved 7;
+  reserved "public_url"; // removed: use the deployment-wide ServerConfig.public_url instead
   bool   enabled      = 1;
   string host         = 2;
   int32  port         = 3;
   string username     = 4;
   string password     = 5; // write-only; leave blank to keep existing
   string from_address = 6;
-  string public_url   = 7;
   bool   starttls     = 8;
+}
+
+// ServerConfig holds deployment-wide settings set in the UI. public_url is the
+// browser-facing base URL and, when set, overrides ORKESTRA_PUBLIC_URL for the
+// OIDC redirect, email links, and the setup link.
+message ServerConfig {
+  string public_url = 1; // browser-facing base URL (e.g. https://orkestra.example.com); empty = use env/default
+}
+
+message UpdateServerConfigRequest {
+  string public_url = 1;
 }
 
 message RoleBinding {

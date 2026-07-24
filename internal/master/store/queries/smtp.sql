@@ -2,8 +2,8 @@
 SELECT * FROM smtp_config LIMIT 1;
 
 -- name: UpsertSMTPConfig :one
-INSERT INTO smtp_config (id, enabled, host, port, username, password_enc, from_address, public_url, starttls, updated_at)
-VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO smtp_config (id, enabled, host, port, username, password_enc, from_address, starttls, updated_at)
+VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (id) DO UPDATE SET
     enabled      = excluded.enabled,
     host         = excluded.host,
@@ -11,7 +11,6 @@ ON CONFLICT (id) DO UPDATE SET
     username     = excluded.username,
     password_enc = excluded.password_enc,
     from_address = excluded.from_address,
-    public_url   = excluded.public_url,
     starttls     = excluded.starttls,
     updated_at   = excluded.updated_at
 RETURNING *;

@@ -191,6 +191,12 @@ type Server struct {
 	DeletedAt     *int64  `json:"deleted_at"`
 }
 
+type ServerConfig struct {
+	ID        int32  `json:"id"`
+	PublicUrl string `json:"public_url"`
+	UpdatedAt int64  `json:"updated_at"`
+}
+
 type Session struct {
 	ID          string  `json:"id"`
 	UserID      string  `json:"user_id"`
@@ -211,7 +217,6 @@ type SmtpConfig struct {
 	Username    string `json:"username"`
 	PasswordEnc string `json:"password_enc"`
 	FromAddress string `json:"from_address"`
-	PublicUrl   string `json:"public_url"`
 	Starttls    bool   `json:"starttls"`
 	UpdatedAt   int64  `json:"updated_at"`
 }

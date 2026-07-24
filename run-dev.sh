@@ -319,13 +319,24 @@ auto_configure() {
   fi
   echo "  ✓ Logged in"
 
+  # Set the deployment-wide public URL (used for OIDC redirect, email, and setup links).
+  if curl -sf -b "$COOKIE_JAR" \
+      -H "Content-Type: application/json" \
+      -H "Connect-Protocol-Version: 1" \
+      -d "{\"public_url\":\"http://localhost:${UI_PORT}\"}" \
+      "http://localhost:${UI_PORT}/orkestra.v1.AuthService/UpdateServerConfig" > /dev/null; then
+    echo "  ✓ Public URL set"
+  else
+    echo "  ⚠ UpdateServerConfig failed — set manually in Settings → General"
+  fi
+
   # Configure SMTP via Mailpit
   if [[ "$START_MAILPIT" == "1" ]]; then
     echo "  → Configuring SMTP (Mailpit on port ${MAILPIT_SMTP_PORT})..."
     if curl -sf -b "$COOKIE_JAR" \
         -H "Content-Type: application/json" \
         -H "Connect-Protocol-Version: 1" \
-        -d "{\"enabled\":true,\"host\":\"localhost\",\"port\":${MAILPIT_SMTP_PORT},\"username\":\"\",\"password\":\"\",\"fromAddress\":\"orkestra@dev.local\",\"publicUrl\":\"http://localhost:${UI_PORT}\",\"starttls\":false}" \
+        -d "{\"enabled\":true,\"host\":\"localhost\",\"port\":${MAILPIT_SMTP_PORT},\"username\":\"\",\"password\":\"\",\"fromAddress\":\"orkestra@dev.local\",\"starttls\":false}" \
         "http://localhost:${UI_PORT}/orkestra.v1.AuthService/UpdateSMTPConfig" > /dev/null; then
       echo "  ✓ SMTP configured"
     else
