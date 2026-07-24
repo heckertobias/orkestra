@@ -2,6 +2,40 @@
 
 All notable changes to orkestra are documented here.
 
+## [v0.1.1] — 2026-07-24
+
+Patch release: correctness and security fixes for TLS / reverse-proxy deployments, plus repository
+and CI hardening. No schema-breaking changes; upgrade in place.
+
+### Fixed
+
+- **Browser-facing URLs from a single, settable public URL ([#8](https://github.com/heckertobias/orkestra/issues/8)):**
+  the OIDC `redirect_uri`, the first-run setup link, and password-reset/invite email links no longer
+  hardcode `http://`. They resolve from one public base URL by precedence: an admin-set
+  *Settings → General → Public URL* (stored in the new `server_config` table, applied live — a change
+  re-initialises the OIDC provider without a Master restart) → `ORKESTRA_PUBLIC_URL` →
+  `X-Forwarded-Proto`/`X-Forwarded-Host` or the bind address (scheme from `ORKESTRA_SECURE_COOKIES`).
+  Fixes broken SSO login behind TLS-terminating proxies / passthrough ingress, where the `http://`
+  `redirect_uri` mismatched the `https://` URI registered at the IdP. The email-only
+  `smtp_config.public_url` is folded into this one deployment-wide setting (migration `00012`
+  promotes any existing value on upgrade).
+- **`Secure` attribute on session & OIDC cookies ([#6](https://github.com/heckertobias/orkestra/pull/6)):**
+  cookies now carry `Secure` by default, gated by `ORKESTRA_SECURE_COOKIES` (disable only for
+  plain-HTTP local dev).
+- **Agent Docker client migrated to `github.com/moby/moby/client` ([#5](https://github.com/heckertobias/orkestra/pull/5)):**
+  off the dead / API-incompatible `docker/docker` import path.
+- **Release packaging:** publish the dearmored binary keyring (apt) alongside the ASCII-armored key
+  (dnf) so both package repositories verify correctly.
+
+### Changed
+
+- **Repository & CI hardening:** CodeQL analysis, Dependabot, SHA-pinned GitHub Actions, and security
+  policies; a dedicated frontend build + lint CI job (react-query migration to clear eslint errors);
+  dependency bumps across the web and actions groups.
+- **Docs:** `ROADMAP.md` replaced by GitHub issues (all references repointed); a WIP disclaimer added.
+
+[v0.1.1]: https://github.com/heckertobias/orkestra/releases/tag/v0.1.1
+
 ## [v0.1.0] — 2026-07-18
 
 First published release. orkestra is a lightweight Master/Agent orchestrator for Docker Compose
