@@ -96,6 +96,10 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Unit tests for the pure helpers in web/src/lib (no DOM required).
+      - name: Test
+        run: npm test
+
   integration:
     name: Integration Tests
     runs-on: ubuntu-latest

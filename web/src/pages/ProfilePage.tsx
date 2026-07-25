@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '@/lib/auth'
 import { useToast } from '@/components/ui/toast-context'
+import { apiError } from '@/lib/apiError'
 
 function connectPost(procedure: string, body: unknown) {
   return fetch(`/orkestra.v1.AuthService/${procedure}`, {
@@ -8,14 +9,6 @@ function connectPost(procedure: string, body: unknown) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-}
-
-function apiError(text: string): string {
-  try {
-    const j = JSON.parse(text)
-    if (j && typeof j.message === 'string' && j.message) return j.message
-  } catch { /* plain text */ }
-  return text || 'Request failed'
 }
 
 export function ProfilePage() {

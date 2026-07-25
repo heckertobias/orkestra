@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, Link, getRouteApi } from '@tanstack/react-router'
 import { useAuth } from '@/lib/auth'
+import { parseConnectError } from '@/lib/apiError'
 import logo from '@/assets/logo.webp'
 
 const routeApi = getRouteApi('/login')
@@ -193,13 +194,4 @@ export function LoginPage() {
       </div>
     </div>
   )
-}
-
-function parseConnectError(raw: string): string {
-  try {
-    const obj = JSON.parse(raw.replace(/^.*?: /, ''))
-    return obj.message ?? raw
-  } catch {
-    return raw.replace(/^Error: /, '')
-  }
 }
