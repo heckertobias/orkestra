@@ -2,16 +2,11 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Plus, RefreshCw, Pencil, X, ChevronDown, ChevronRight, Check, Info, KeyRound, Mail } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { useAuth, isAdmin } from '@/lib/auth'
+import { useAuth, isAdmin, type RoleBinding } from '@/lib/auth'
+import { buildMatrix, matrixToBindings, type MatrixRow, type MatrixState } from '@/lib/rbacMatrix'
+import { apiError, errText } from '@/lib/apiError'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-
-interface UserBinding {
-  id: string
-  role: string     // admin | operator | viewer | secrets-manager
-  serverId: string // '' = global
-  stackId: string  // '' = all stacks
-}
 
 interface User {
   id: string
@@ -24,7 +19,7 @@ interface User {
   ssoOnly: boolean
   createdAt: number
   lastLoginAt: number
-  bindings: UserBinding[]
+  bindings: RoleBinding[]
 }
 
 interface Server {
@@ -36,122 +31,6 @@ interface Server {
 interface Stack {
   id: string
   name: string
-}
-
-// ─── Matrix state ─────────────────────────────────────────────────────────────
-
-interface MatrixRow {
-  serverId: string
-  serverName: string
-  role: '' | 'viewer' | 'operator'
-  stackIds: string[]  // empty = no restriction (all stacks)
-  expanded: boolean
-  availableStacks: { id: string; name: string }[]
-}
-
-interface MatrixState {
-  admin: boolean
-  secretsManager: boolean
-  rows: MatrixRow[]  // rows[0] is always the global row (serverId='')
-}
-
-// ─── Helper: build matrix from existing bindings ──────────────────────────────
-
-function buildMatrix(bindings: UserBinding[], servers: Server[], stacks: Stack[]): MatrixState {
-  const stackById = new Map(stacks.map(s => [s.id, s]))
-
-  const admin = bindings.some(b => b.role === 'admin')
-  const secretsManager = bindings.some(b => b.role === 'secrets-manager')
-
-  function serverRole(serverId: string): '' | 'viewer' | 'operator' {
-    const relevant = bindings.filter(b =>
-      b.serverId === serverId && (b.role === 'viewer' || b.role === 'operator')
-    )
-    if (relevant.some(b => b.role === 'operator')) return 'operator'
-    if (relevant.some(b => b.role === 'viewer')) return 'viewer'
-    return ''
-  }
-
-  function stackIds(serverId: string, role: string): string[] {
-    if (!role) return []
-    if (bindings.some(b => b.serverId === serverId && b.role === role && b.stackId === ''))
-      return []
-    return bindings
-      .filter(b => b.serverId === serverId && b.role === role && b.stackId !== '')
-      .map(b => b.stackId)
-  }
-
-  const globalRole = serverRole('')
-  const rows: MatrixRow[] = [
-    {
-      serverId: '',
-      serverName: 'Global (all servers)',
-      role: globalRole,
-      stackIds: [],
-      expanded: false,
-      availableStacks: [],
-    },
-  ]
-
-  for (const server of servers) {
-    const role = serverRole(server.id)
-    const ids = stackIds(server.id, role)
-    const availableStacks = server.assignments
-      .map(a => stackById.get(a.stackId))
-      .filter((s): s is Stack => s !== undefined)
-      .map(s => ({ id: s.id, name: s.name }))
-
-    rows.push({
-      serverId: server.id,
-      serverName: server.name,
-      role,
-      stackIds: ids,
-      expanded: ids.length > 0,
-      availableStacks,
-    })
-  }
-
-  return { admin, secretsManager, rows }
-}
-
-// ─── Helper: matrix → desired bindings (no IDs) ───────────────────────────────
-
-type DesiredBinding = Omit<UserBinding, 'id'>
-
-function matrixToBindings(matrix: MatrixState): DesiredBinding[] {
-  // When admin is on, only the admin binding matters — all other settings are
-  // hidden and should not be persisted.
-  if (matrix.admin) return [{ role: 'admin', serverId: '', stackId: '' }]
-
-  const result: DesiredBinding[] = []
-  if (matrix.secretsManager) result.push({ role: 'secrets-manager', serverId: '', stackId: '' })
-
-  for (const row of matrix.rows) {
-    if (!row.role) continue
-    if (row.stackIds.length === 0) {
-      result.push({ role: row.role, serverId: row.serverId, stackId: '' })
-    } else {
-      for (const stackId of row.stackIds) {
-        result.push({ role: row.role, serverId: row.serverId, stackId })
-      }
-    }
-  }
-  return result
-}
-
-// ─── Error helpers ────────────────────────────────────────────────────────────
-
-/** Unwrap a Connect-protocol JSON error body into a human-readable message. */
-function apiError(text: string): string {
-  try {
-    const j = JSON.parse(text)
-    if (j && typeof j.message === 'string' && j.message) return j.message
-  } catch { /* plain text response */ }
-  return text || 'Request failed'
-}
-
-function errText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e)
 }
 
 // ─── UsersPage ────────────────────────────────────────────────────────────────
