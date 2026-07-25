@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from '@tanstack/react-router'
 import { useAuth } from '@/lib/auth'
 
 export function LoggedOutPage() {
@@ -50,7 +50,7 @@ export function LoggedOutPage() {
 
               <div className="space-y-3">
                 <button
-                  onClick={() => navigate('/login', { replace: true })}
+                  onClick={() => navigate({ to: '/login', replace: true })}
                   className="w-full py-2 rounded text-sm font-medium"
                   style={{ backgroundColor: 'var(--accent)', color: '#0d1117' }}>
                   Back to sign in

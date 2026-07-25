@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link } from '@tanstack/react-router'
 import { RefreshCw, Plus } from 'lucide-react'
 import { Badge, StatusDot } from '@/components/ui/badge'
 import { AddServerDialog } from '@/components/AddServerDialog'
@@ -125,7 +125,7 @@ export function ServersPage() {
                 style={{ borderBottom: `1px solid var(--border)` }}
               >
                 <td className="px-4 py-3 font-medium">
-                  <Link to={`/servers/${s.id}`} style={{ color: 'var(--text)' }} className="hover:text-[var(--accent)]">
+                  <Link to="/servers/$id" params={{ id: s.id }} style={{ color: 'var(--text)' }} className="hover:text-[var(--accent)]">
                     {s.name || s.hostname}
                   </Link>
                 </td>

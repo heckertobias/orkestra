@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams, Link } from 'react-router-dom'
+import { Link, getRouteApi } from '@tanstack/react-router'
 import logo from '@/assets/logo.webp'
 
+const routeApi = getRouteApi('/verify-email')
+
 export function VerifyEmailPage() {
-  const [params] = useSearchParams()
-  const token = params.get('token') ?? ''
+  const { token = '' } = routeApi.useSearch()
 
   // Initialise from the token so the effect never calls setState synchronously
   // (the no-token case is a derived initial state, not an effect side-effect).

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { Plus, RefreshCw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 
@@ -47,7 +47,7 @@ export function StacksPage() {
             <RefreshCw size={14} /> Refresh
           </button>
           <button
-            onClick={() => navigate('/stacks/new')}
+            onClick={() => navigate({ to: '/stacks/new' })}
             className="flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium"
             style={{ backgroundColor: 'var(--accent)', color: '#0d1117' }}>
             <Plus size={14} /> New Stack
@@ -69,13 +69,13 @@ export function StacksPage() {
             {loading && <tr><td colSpan={4} className="px-4 py-8 text-center" style={{ color: 'var(--text-muted)' }}>Loading…</td></tr>}
             {!loading && stacks.length === 0 && (
               <tr><td colSpan={4} className="px-4 py-8 text-center" style={{ color: 'var(--text-muted)' }}>
-                No stacks yet. <button onClick={() => navigate('/stacks/new')} className="underline" style={{ color: 'var(--accent)' }}>Create one</button> to start deploying.
+                No stacks yet. <button onClick={() => navigate({ to: '/stacks/new' })} className="underline" style={{ color: 'var(--accent)' }}>Create one</button> to start deploying.
               </td></tr>
             )}
             {stacks.map(s => (
               <tr key={s.id} className="hover:bg-[var(--surface-2)]" style={{ borderBottom: '1px solid var(--border)' }}>
                 <td className="px-4 py-3 font-medium">
-                  <Link to={`/stacks/${s.id}`} className="hover:underline" style={{ color: 'var(--text)' }}>{s.name}</Link>
+                  <Link to="/stacks/$id" params={{ id: s.id }} className="hover:underline" style={{ color: 'var(--text)' }}>{s.name}</Link>
                 </td>
                 <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>{s.description || '—'}</td>
                 <td className="px-4 py-3">

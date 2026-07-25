@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
-import { useNavigate, useSearchParams, Link } from 'react-router-dom'
+import { useNavigate, Link, getRouteApi } from '@tanstack/react-router'
 import { useAuth } from '@/lib/auth'
 import logo from '@/assets/logo.webp'
+
+const routeApi = getRouteApi('/login')
 
 // Check at load time if OIDC is enabled — best-effort, silently ignored.
 async function checkOIDCEnabled(): Promise<boolean> {
@@ -18,9 +20,8 @@ async function checkOIDCEnabled(): Promise<boolean> {
 export function LoginPage() {
   const { login, user } = useAuth()
   const navigate = useNavigate()
-  const [params] = useSearchParams()
-  const setupToken = params.get('setup') ?? ''
-  const oidcError = params.get('error')
+  const { setup, error: oidcError } = routeApi.useSearch()
+  const setupToken = setup ?? ''
 
   const isSetup = Boolean(setupToken)
 
@@ -34,7 +35,7 @@ export function LoginPage() {
   const [setupDisplayName, setSetupDisplayName] = useState('')
 
   useEffect(() => {
-    if (user) navigate('/', { replace: true })
+    if (user) navigate({ to: '/', replace: true })
   }, [user, navigate])
 
   useEffect(() => {
@@ -47,7 +48,7 @@ export function LoginPage() {
     setError(null)
     try {
       await login(username, password)
-      navigate('/', { replace: true })
+      navigate({ to: '/', replace: true })
     } catch (err) {
       setError(parseConnectError(String(err)))
     } finally {
@@ -71,7 +72,7 @@ export function LoginPage() {
       }
       // Log in after setup
       await login(username, password)
-      navigate('/', { replace: true })
+      navigate({ to: '/', replace: true })
     } catch (err) {
       setError(String(err))
     } finally {

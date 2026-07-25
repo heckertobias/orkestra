@@ -12,7 +12,7 @@ import (
 var dist embed.FS
 
 // Handler returns an http.Handler that serves the embedded SPA from web/dist.
-// Unknown paths fall back to index.html so React Router handles client-side routing.
+// Unknown paths fall back to index.html so the SPA router handles client-side routing.
 func Handler() http.Handler {
 	sub, _ := fs.Sub(dist, "dist")
 	fileServer := http.FileServerFS(sub)
