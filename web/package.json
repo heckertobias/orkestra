@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsr generate && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -26,12 +26,13 @@
     "lucide-react": "^1.25.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "react-router-dom": "^7.18.1",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/router-cli": "^1.167.21",
+    "@tanstack/router-plugin": "^1.168.23",
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",

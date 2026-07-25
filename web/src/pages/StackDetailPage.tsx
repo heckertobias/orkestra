@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, getRouteApi } from '@tanstack/react-router'
 import { ArrowLeft, Pencil, Rocket } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { DeployStackDialog } from '@/components/DeployStackDialog'
 import { extractComposeVarDefaults } from '@/lib/env'
+
+const routeApi = getRouteApi('/_authenticated/stacks/$id/')
 
 interface StackVersion {
   id: string
@@ -21,7 +23,7 @@ interface Stack {
 }
 
 export function StackDetailPage() {
-  const { id } = useParams<{ id: string }>()
+  const { id } = routeApi.useParams()
   const navigate = useNavigate()
   const [stack, setStack] = useState<Stack | null>(null)
   const [versions, setVersions] = useState<StackVersion[]>([])
@@ -81,7 +83,7 @@ export function StackDetailPage() {
             <Rocket size={14} /> Deploy
           </button>
           <button
-            onClick={() => navigate(`/stacks/${id}/edit`)}
+            onClick={() => navigate({ to: '/stacks/$id/edit', params: { id } })}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded border text-sm transition-colors hover:bg-[var(--surface-2)]"
             style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
           >

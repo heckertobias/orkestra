@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from '@tanstack/react-router'
 import { Server, Layers, Activity, AlertCircle, Info, AlertTriangle } from 'lucide-react'
 import { StatusDot, Badge } from '@/components/ui/badge'
 
@@ -182,7 +182,7 @@ export function DashboardPage() {
                 ) : servers.map(s => (
                   <tr key={s.id} className="hover:bg-[var(--surface-2)]" style={{ borderBottom: '1px solid var(--border)' }}>
                     <td className="px-4 py-3">
-                      <Link to={`/servers/${s.id}`} className="font-medium hover:underline" style={{ color: 'var(--text)' }}>
+                      <Link to="/servers/$id" params={{ id: s.id }} className="font-medium hover:underline" style={{ color: 'var(--text)' }}>
                         {s.name || s.hostname}
                       </Link>
                     </td>

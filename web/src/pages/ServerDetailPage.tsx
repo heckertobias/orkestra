@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { Link, getRouteApi } from '@tanstack/react-router'
 import { ArrowLeft, RefreshCw, Play, Square, RotateCcw, Trash2, Terminal } from 'lucide-react'
 import { Badge, StatusDot } from '@/components/ui/badge'
+
+const routeApi = getRouteApi('/_authenticated/servers/$id')
 
 interface Container {
   id: string
@@ -25,7 +27,7 @@ interface Server {
 }
 
 export function ServerDetailPage() {
-  const { id } = useParams<{ id: string }>()
+  const { id } = routeApi.useParams()
   const [server, setServer] = useState<Server | null>(null)
   const [containers] = useState<Container[]>([])
   const [loading, setLoading] = useState(true)

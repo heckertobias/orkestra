@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams, Link } from 'react-router-dom'
+import { useNavigate, useParams, Link } from '@tanstack/react-router'
 import { ArrowLeft, Download, Link2, Plus, Trash2, Upload } from 'lucide-react'
 import CodeMirror from '@uiw/react-codemirror'
 import { yaml } from '@codemirror/lang-yaml'
@@ -219,7 +219,8 @@ function newEnvVar(name: string, manual: boolean): EnvVar {
 }
 
 export function StackEditorPage() {
-  const { id } = useParams<{ id?: string }>()
+  // Shared by /stacks/new (no id) and /stacks/$id/edit — read the optional param loosely.
+  const { id } = useParams({ strict: false })
   const navigate = useNavigate()
   const isEdit = Boolean(id)
 
@@ -396,7 +397,7 @@ export function StackEditorPage() {
           const body = await res.json().catch(() => ({}))
           throw new Error(body?.message ?? `HTTP ${res.status}`)
         }
-        navigate(`/stacks/${id}`)
+        navigate({ to: '/stacks/$id', params: { id: id! } })
       } else {
         // CreateStack
         const res = await fetch('/orkestra.v1.StackService/CreateStack', {
@@ -414,7 +415,7 @@ export function StackEditorPage() {
           throw new Error(body?.message ?? `HTTP ${res.status}`)
         }
         const data = await res.json()
-        navigate(`/stacks/${data.id ?? data.Id ?? ''}`)
+        navigate({ to: '/stacks/$id', params: { id: String(data.id ?? data.Id ?? '') } })
       }
     } catch (e) {
       setError(String(e))
@@ -478,13 +479,24 @@ export function StackEditorPage() {
         </div>
         {/* Actions */}
         <div className="flex items-end gap-2 shrink-0">
-          <Link
-            to={isEdit ? `/stacks/${id}` : '/stacks'}
-            className="px-4 py-1.5 rounded border text-sm"
-            style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
-          >
-            Cancel
-          </Link>
+          {isEdit ? (
+            <Link
+              to="/stacks/$id"
+              params={{ id: id! }}
+              className="px-4 py-1.5 rounded border text-sm"
+              style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+            >
+              Cancel
+            </Link>
+          ) : (
+            <Link
+              to="/stacks"
+              className="px-4 py-1.5 rounded border text-sm"
+              style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+            >
+              Cancel
+            </Link>
+          )}
           <button
             onClick={handleSave}
             disabled={saving}

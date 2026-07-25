@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { useSearchParams, useNavigate, Link } from 'react-router-dom'
+import { useNavigate, Link, getRouteApi } from '@tanstack/react-router'
 import logo from '@/assets/logo.webp'
 
+const routeApi = getRouteApi('/set-password')
+
 export function SetPasswordPage() {
-  const [params] = useSearchParams()
-  const token = params.get('token') ?? ''
+  const { token = '' } = routeApi.useSearch()
   const navigate = useNavigate()
 
   const [password, setPassword] = useState('')
@@ -30,7 +31,7 @@ export function SetPasswordPage() {
         const d = await res.json().catch(() => ({}))
         throw new Error(d.message ?? 'Failed to set password')
       }
-      navigate('/login', { replace: true })
+      navigate({ to: '/login', replace: true })
     } catch (err) {
       setError(String(err).replace(/^Error: /, ''))
     } finally {

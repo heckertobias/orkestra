@@ -1,6 +1,5 @@
-import { NavLink, useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { Server, Layers, KeyRound, Users, LayoutDashboard, Settings, ClipboardList, LogOut } from 'lucide-react'
-import { cn } from '@/lib/cn'
 import { useAuth, isAdmin, canManageSecrets } from '@/lib/auth'
 import logoMark from '@/assets/logo-mark.webp'
 
@@ -14,7 +13,7 @@ export function Sidebar() {
   // the actual logout. Clearing `user` here (still on a guarded route) would let AuthGuard
   // redirect to /login before we reach /logged-out.
   function handleLogout() {
-    navigate('/logged-out', { replace: true })
+    navigate({ to: '/logged-out', replace: true })
   }
 
   return (
@@ -32,7 +31,7 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 px-2 py-3 space-y-0.5">
-        {[
+        {([
           { to: '/',         label: 'Dashboard', icon: LayoutDashboard, show: true },
           { to: '/servers',  label: 'Servers',   icon: Server,          show: true },
           { to: '/stacks',   label: 'Stacks',    icon: Layers,          show: true },
@@ -40,21 +39,18 @@ export function Sidebar() {
           { to: '/users',    label: 'Users',     icon: Users,           show: admin },
           { to: '/audit',    label: 'Audit Log', icon: ClipboardList,   show: admin },
           { to: '/settings', label: 'Settings',  icon: Settings,        show: admin },
-        ].filter(item => item.show).map(({ to, label, icon: Icon }) => (
-          <NavLink
+        ] as const).filter(item => item.show).map(({ to, label, icon: Icon }) => (
+          <Link
             key={to}
             to={to}
-            end={to === '/'}
-            className={({ isActive }) => cn(
-              'flex items-center gap-3 px-3 py-2 rounded text-sm transition-colors',
-              isActive
-                ? 'text-[var(--accent)] bg-[rgba(126,226,42,0.08)]'
-                : 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)]',
-            )}
+            activeOptions={{ exact: to === '/' }}
+            className="flex items-center gap-3 px-3 py-2 rounded text-sm transition-colors"
+            activeProps={{ className: 'text-[var(--accent)] bg-[rgba(126,226,42,0.08)]' }}
+            inactiveProps={{ className: 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)]' }}
           >
             <Icon size={16} />
             {label}
-          </NavLink>
+          </Link>
         ))}
       </nav>
 
@@ -62,7 +58,7 @@ export function Sidebar() {
       {user && (
         <div className="px-3 py-3 border-t" style={{ borderColor: 'var(--border)' }}>
           <div className="flex items-center justify-between gap-2">
-            <NavLink
+            <Link
               to="/profile"
               className="min-w-0 flex-1 rounded px-1 py-0.5 hover:bg-[var(--surface-2)] transition-colors"
               title="View profile & change password"
@@ -73,7 +69,7 @@ export function Sidebar() {
               <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>
                 {user.roles.join(', ') || 'no role'}
               </p>
-            </NavLink>
+            </Link>
             <button
               onClick={handleLogout}
               className="p-1.5 rounded hover:bg-[var(--surface-2)] shrink-0"

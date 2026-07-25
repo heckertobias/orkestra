@@ -1,8 +1,6 @@
 import { useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Ctx, fetchCurrentUser } from './auth'
-
-const CURRENT_USER_KEY = ['currentUser'] as const
+import { Ctx, fetchCurrentUser, CURRENT_USER_KEY } from './auth'
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const qc = useQueryClient()

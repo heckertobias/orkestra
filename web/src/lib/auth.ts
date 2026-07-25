@@ -38,6 +38,10 @@ export function useAuth() {
   return useContext(Ctx)
 }
 
+// Shared react-query key for the current user, used by both AuthProvider (component-level
+// state) and the router's `beforeLoad` auth guard so they hit the same cache entry.
+export const CURRENT_USER_KEY = ['currentUser'] as const
+
 // Fetches the current user; returns null when unauthenticated (non-2xx) so the
 // react-query query resolves with data rather than erroring. Used by AuthProvider.
 export async function fetchCurrentUser(): Promise<AuthUser | null> {
