@@ -172,7 +172,8 @@ const listAssignmentsForServer = `-- name: ListAssignmentsForServer :many
 SELECT a.id, a.server_id, a.stack_id, a.stack_version_id, a.desired_status, a.assigned_by, a.assigned_at, a.env_values, sv.compose_yaml, sv.secret_refs
 FROM assignments a
 JOIN stack_versions sv ON sv.id = a.stack_version_id
-WHERE a.server_id = $1
+JOIN stacks s ON s.id = a.stack_id
+WHERE a.server_id = $1 AND s.deleted_at IS NULL
 `
 
 type ListAssignmentsForServerRow struct {

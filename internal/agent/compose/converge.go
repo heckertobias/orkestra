@@ -65,6 +65,31 @@ func Converge(ctx context.Context, dc *client.Client, stackID string, proj *comp
 	return nil
 }
 
+// ListManagedStackIDs returns the distinct stack IDs of every orkestra-managed container on the
+// host. It is used to detect stacks that have disappeared from the desired state and must be
+// removed, since the Master always pushes the full desired state rather than a diff.
+func ListManagedStackIDs(ctx context.Context, dc *client.Client) ([]string, error) {
+	f := make(client.Filters).Add("label", managedLabel+"=true")
+	res, err := dc.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f})
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{})
+	ids := make([]string, 0, len(res.Items))
+	for _, c := range res.Items {
+		id := c.Labels[stackIDLabel]
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
 // Remove stops and deletes all managed containers for a stack.
 func Remove(ctx context.Context, dc *client.Client, stackID string) error {
 	list, err := listStackContainers(ctx, dc, stackID)
