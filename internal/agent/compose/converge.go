@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -37,14 +38,19 @@ func Converge(ctx context.Context, dc *client.Client, stackID string, proj *comp
 		existingByService[svc] = c
 	}
 
+	var svcErrs []error
 	for _, svcName := range sortedServices(proj) {
 		svc := proj.Services[svcName]
 		desired := specHash(svc)
 
-		if cur, ok := existingByService[svcName]; ok {
+		cur, exists := existingByService[svcName]
+		// This service is part of the desired project, so it is never an orphan — mark it handled
+		// regardless of the outcome below, so the orphan-removal loop leaves it alone.
+		delete(existingByService, svcName)
+
+		if exists {
 			if cur.Labels[specHashLabel] == desired && cur.State == "running" {
 				slog.Debug("service up-to-date", "stack", stackID, "service", svcName)
-				delete(existingByService, svcName)
 				continue
 			}
 			slog.Info("recreating container", "stack", stackID, "service", svcName)
@@ -53,16 +59,49 @@ func Converge(ctx context.Context, dc *client.Client, stackID string, proj *comp
 
 		slog.Info("creating container", "stack", stackID, "service", svcName)
 		if err := createAndStart(ctx, dc, stackID, proj.Name, svcName, svc, desired); err != nil {
-			return fmt.Errorf("create %s/%s: %w", stackID, svcName, err)
+			// Partial failure: record and keep reconciling the rest of the stack. Aborting here
+			// would leave every alphabetically-later service and the orphan cleanup untouched.
+			slog.Error("create container failed", "stack", stackID, "service", svcName, "err", err)
+			svcErrs = append(svcErrs, fmt.Errorf("%s: %w", svcName, err))
+			continue
 		}
-		delete(existingByService, svcName)
 	}
 
+	// Orphan removal always runs, even after a service failure above.
 	for svcName, c := range existingByService {
 		slog.Info("removing orphan", "stack", stackID, "service", svcName)
 		_ = removeContainer(ctx, dc, c.ID)
 	}
+
+	if len(svcErrs) > 0 {
+		return fmt.Errorf("converge %s: %d service(s) failed: %w", stackID, len(svcErrs), errors.Join(svcErrs...))
+	}
 	return nil
+}
+
+// ListManagedStackIDs returns the distinct stack IDs of every orkestra-managed container on the
+// host. It is used to detect stacks that have disappeared from the desired state and must be
+// removed, since the Master always pushes the full desired state rather than a diff.
+func ListManagedStackIDs(ctx context.Context, dc *client.Client) ([]string, error) {
+	f := make(client.Filters).Add("label", managedLabel+"=true")
+	res, err := dc.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f})
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{})
+	ids := make([]string, 0, len(res.Items))
+	for _, c := range res.Items {
+		id := c.Labels[stackIDLabel]
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids, nil
 }
 
 // Remove stops and deletes all managed containers for a stack.
