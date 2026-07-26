@@ -47,7 +47,8 @@ DELETE FROM assignments WHERE server_id = $1 AND stack_id = $2;
 SELECT a.*, sv.compose_yaml, sv.secret_refs
 FROM assignments a
 JOIN stack_versions sv ON sv.id = a.stack_version_id
-WHERE a.server_id = $1;
+JOIN stacks s ON s.id = a.stack_id
+WHERE a.server_id = $1 AND s.deleted_at IS NULL;
 
 -- name: ListAssignmentsForStack :many
 SELECT * FROM assignments WHERE stack_id = $1;
