@@ -107,7 +107,9 @@ Every orkestra-managed container carries these labels:
 The **`spec-hash`** decides whether a container has to be recreated. It is a SHA-256 (first 8
 bytes) over the identity-relevant part of the service spec:
 
-- image reference
+- image reference **and the resolved image ID** — the tag is pulled per `pull_policy` and inspected
+  *before* the recreate decision, so a moved tag (e.g. a repointed `latest`) changes the hash and
+  recreates, and a failed pull leaves the running container untouched
 - command / entrypoint
 - environment variables
 - ports
@@ -205,8 +207,6 @@ wired yet.
 >   drop its data.
 > - **Concurrency:** services at the same dependency level can start in parallel (`errgroup` with
 >   bounded concurrency).
-> - **Image digest pinning:** resolving a tag to `image@sha256:…` before hashing is what makes a
->   moved `latest` tag trigger a recreate.
 > - **Field coverage vs. the hash:** any newly supported field must also enter the spec-hash, or
 >   changing it will not recreate the container.
 

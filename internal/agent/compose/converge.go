@@ -41,13 +41,30 @@ func Converge(ctx context.Context, dc *client.Client, stackID string, proj *comp
 	var svcErrs []error
 	for _, svcName := range sortedServices(proj) {
 		svc := proj.Services[svcName]
-		desired := specHash(svc)
 
 		cur, exists := existingByService[svcName]
 		// This service is part of the desired project, so it is never an orphan — mark it handled
 		// regardless of the outcome below, so the orphan-removal loop leaves it alone.
 		delete(existingByService, svcName)
 
+		// Phase 1: resolve and pull the image per pull_policy BEFORE touching any container. This
+		// keeps a running container alive across a slow or failing pull, and lets pull_policy:always
+		// pick up a repointed tag instead of pulling only after the old container is already gone.
+		image := svc.Image
+		if image == "" {
+			image = proj.Name + "_" + svcName
+		} else if err := ensureImage(ctx, dc, image, svc.PullPolicy); err != nil {
+			// Leave any existing container running and keep reconciling the rest of the stack.
+			slog.Error("resolve image failed", "stack", stackID, "service", svcName, "err", err)
+			svcErrs = append(svcErrs, fmt.Errorf("%s: %w", svcName, err))
+			continue
+		}
+
+		// Phase 2: hash over the resolved image ID, so a moved tag (same string, new content)
+		// changes identity and forces a recreate — a plain tag string never would.
+		desired := specHash(svc, imageID(ctx, dc, image))
+
+		// Phase 3: compare, then remove + recreate only if drifted.
 		if exists {
 			if cur.Labels[specHashLabel] == desired && cur.State == "running" {
 				slog.Debug("service up-to-date", "stack", stackID, "service", svcName)
@@ -58,7 +75,7 @@ func Converge(ctx context.Context, dc *client.Client, stackID string, proj *comp
 		}
 
 		slog.Info("creating container", "stack", stackID, "service", svcName)
-		if err := createAndStart(ctx, dc, stackID, proj.Name, svcName, svc, desired); err != nil {
+		if err := createAndStart(ctx, dc, stackID, proj.Name, svcName, svc, image, desired); err != nil {
 			// Partial failure: record and keep reconciling the rest of the stack. Aborting here
 			// would leave every alphabetically-later service and the orphan cleanup untouched.
 			slog.Error("create container failed", "stack", stackID, "service", svcName, "err", err)
@@ -158,7 +175,9 @@ func removeContainer(ctx context.Context, dc *client.Client, id string) error {
 	return err
 }
 
-func createAndStart(ctx context.Context, dc *client.Client, stackID, projectName, svcName string, svc composetypes.ServiceConfig, hash string) error {
+// createAndStart creates and starts the container for a service. The image must already have been
+// resolved and pulled by the caller (Converge phase 1); createAndStart does not pull.
+func createAndStart(ctx context.Context, dc *client.Client, stackID, projectName, svcName string, svc composetypes.ServiceConfig, image, hash string) error {
 	labels := map[string]string{
 		managedLabel:                 "true",
 		stackIDLabel:                 stackID,
@@ -181,13 +200,6 @@ func createAndStart(ctx context.Context, dc *client.Client, stackID, projectName
 		if v != nil {
 			env = append(env, k+"="+*v)
 		}
-	}
-
-	image := svc.Image
-	if image == "" {
-		image = projectName + "_" + svcName
-	} else if err := ensureImage(ctx, dc, image, svc.PullPolicy); err != nil {
-		return err
 	}
 
 	var cmd, entrypoint []string
@@ -266,6 +278,21 @@ func ensureImage(ctx context.Context, dc *client.Client, ref, pullPolicy string)
 	return nil
 }
 
+// imageID returns the local content-addressable ID of ref, or "" if it can't be determined (e.g. a
+// build image that isn't present, or ref unset). Best-effort: when unknown, identity falls back to
+// the tag string carried in the spec-hash. Feeding the ID into the hash is what lets a moved tag —
+// same string, new content — force a recreate.
+func imageID(ctx context.Context, dc *client.Client, ref string) string {
+	if ref == "" {
+		return ""
+	}
+	ins, err := dc.ImageInspect(ctx, ref)
+	if err != nil {
+		return ""
+	}
+	return ins.ID
+}
+
 // shouldPull decides whether to pull an image given the Compose pull_policy and whether the
 // image is already present locally. An empty policy defaults to "missing" (Compose default).
 // "never" and "build" never pull — for "never" a missing image lets ContainerCreate fail loudly,
@@ -281,9 +308,13 @@ func shouldPull(policy string, present bool) bool {
 	}
 }
 
-func specHash(svc composetypes.ServiceConfig) string {
+// specHash is the container-identity fingerprint: a change recreates the container. imageID is the
+// resolved content ID of svc.Image (see imageID); folding it in means a repointed tag recreates,
+// where the tag string alone would not.
+func specHash(svc composetypes.ServiceConfig, imageID string) string {
 	key := struct {
 		Image      string
+		ImageID    string
 		Cmd        []string
 		Entrypoint []string
 		Env        composetypes.MappingWithEquals
@@ -293,7 +324,7 @@ func specHash(svc composetypes.ServiceConfig) string {
 		Privileged bool
 		Restart    string
 	}{
-		svc.Image, svc.Command, svc.Entrypoint, svc.Environment,
+		svc.Image, imageID, svc.Command, svc.Entrypoint, svc.Environment,
 		svc.Ports, svc.WorkingDir, svc.User, svc.Privileged, svc.Restart,
 	}
 	b, _ := json.Marshal(key)
