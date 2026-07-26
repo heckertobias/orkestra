@@ -30,6 +30,10 @@ export interface MatrixRow {
   stackIds: string[]  // empty = no restriction (all stacks)
   expanded: boolean
   availableStacks: { id: string; name: string }[]
+  // Bindings for this server the single-role row cannot represent (e.g. a server-wide viewer
+  // living under a stronger stack-scoped operator). They are carried through untouched and
+  // re-emitted on save so a no-op save stays a no-op (#50). Cleared when the row is edited.
+  passthrough: DesiredBinding[]
 }
 
 export interface MatrixState {
@@ -43,6 +47,41 @@ export type DesiredBinding = Omit<RoleBinding, 'id'>
 
 /** Label for the synthetic first row representing global (all-server) grants. */
 export const GLOBAL_ROW_LABEL = 'Global (all servers)'
+
+const ROLE_RANK: Record<string, number> = { viewer: 1, operator: 2 }
+function rank(role: string): number {
+  return ROLE_RANK[role] ?? 0
+}
+
+/**
+ * Whether a single-role row (its role + selected stackIds) already grants at least as much as
+ * `b`, so dropping `b` from the persisted set changes nothing. A server-wide binding
+ * (`stackId===''`) can only be covered by a server-wide row (empty stackIds); a stack-scoped
+ * binding is covered if the row grants a role >= it at that stack. Used to tell a *redundant*
+ * binding (safe to drop) from an *unrepresentable* one (must be preserved). See #50.
+ */
+function rowCovers(rowRole: '' | 'viewer' | 'operator', rowStackIds: string[], b: DesiredBinding): boolean {
+  if (rank(rowRole) < rank(b.role)) return false
+  const serverWideRow = rowStackIds.length === 0
+  if (b.stackId === '') return serverWideRow
+  return serverWideRow || rowStackIds.includes(b.stackId)
+}
+
+/**
+ * The bindings for one server that the row cannot represent and must carry through untouched:
+ * that server's viewer/operator bindings minus the ones the row already covers.
+ */
+function passthroughFor(
+  serverId: string,
+  rowRole: '' | 'viewer' | 'operator',
+  rowStackIds: string[],
+  bindings: RoleBinding[],
+): DesiredBinding[] {
+  return bindings
+    .filter(b => b.serverId === serverId && (b.role === 'viewer' || b.role === 'operator'))
+    .map(b => ({ role: b.role, serverId: b.serverId, stackId: b.stackId }))
+    .filter(b => !rowCovers(rowRole, rowStackIds, b))
+}
 
 /** Build the matrix view from a user's existing bindings. */
 export function buildMatrix(
@@ -82,6 +121,7 @@ export function buildMatrix(
       stackIds: [],
       expanded: false,
       availableStacks: [],
+      passthrough: passthroughFor('', globalRole, [], bindings),
     },
   ]
 
@@ -100,6 +140,7 @@ export function buildMatrix(
       stackIds: ids,
       expanded: ids.length > 0,
       availableStacks,
+      passthrough: passthroughFor(server.id, role, ids, bindings),
     })
   }
 
@@ -113,17 +154,28 @@ export function matrixToBindings(matrix: MatrixState): DesiredBinding[] {
   if (matrix.admin) return [{ role: 'admin', serverId: '', stackId: '' }]
 
   const result: DesiredBinding[] = []
-  if (matrix.secretsManager) result.push({ role: 'secrets-manager', serverId: '', stackId: '' })
+  const seen = new Set<string>()
+  const emit = (b: DesiredBinding) => {
+    const key = `${b.role}|${b.serverId}|${b.stackId}`
+    if (seen.has(key)) return
+    seen.add(key)
+    result.push(b)
+  }
+
+  if (matrix.secretsManager) emit({ role: 'secrets-manager', serverId: '', stackId: '' })
 
   for (const row of matrix.rows) {
-    if (!row.role) continue
-    if (row.stackIds.length === 0) {
-      result.push({ role: row.role, serverId: row.serverId, stackId: '' })
-    } else {
-      for (const stackId of row.stackIds) {
-        result.push({ role: row.role, serverId: row.serverId, stackId })
+    if (row.role) {
+      if (row.stackIds.length === 0) {
+        emit({ role: row.role, serverId: row.serverId, stackId: '' })
+      } else {
+        for (const stackId of row.stackIds) {
+          emit({ role: row.role, serverId: row.serverId, stackId })
+        }
       }
     }
+    // Re-emit bindings the row could not represent (#50), so a no-op save loses nothing.
+    for (const b of row.passthrough) emit(b)
   }
   return result
 }
