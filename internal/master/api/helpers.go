@@ -56,24 +56,3 @@ func labelsToJSON(labels map[string]string) ([]byte, error) {
 }
 
 func ptrInt64(v int64) *int64 { return &v }
-
-func commandTypeFromString(s string) orkestraV1.CommandType {
-	switch s {
-	case "start":
-		return orkestraV1.CommandType_COMMAND_TYPE_START
-	case "stop":
-		return orkestraV1.CommandType_COMMAND_TYPE_STOP
-	case "restart":
-		return orkestraV1.CommandType_COMMAND_TYPE_RESTART
-	case "pull":
-		return orkestraV1.CommandType_COMMAND_TYPE_PULL
-	case "remove":
-		return orkestraV1.CommandType_COMMAND_TYPE_REMOVE
-	case "exec":
-		return orkestraV1.CommandType_COMMAND_TYPE_EXEC
-	case "prune":
-		return orkestraV1.CommandType_COMMAND_TYPE_PRUNE
-	default:
-		return orkestraV1.CommandType_COMMAND_TYPE_UNSPECIFIED
-	}
-}

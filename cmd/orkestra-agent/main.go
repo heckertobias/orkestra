@@ -111,7 +111,9 @@ func runServe(args []string) {
 		case *orkestraV1.MasterMessage_Ping:
 			slog.Debug("ping from master", "ts", p.Ping.TimestampMs)
 		case *orkestraV1.MasterMessage_ExecCommand:
-			slog.Debug("exec command received (M2 dockerctl)")
+			// Container command dispatch is not built yet (#61); the Master no longer sends these
+			// and returns Unimplemented instead. Kept for switch completeness.
+			slog.Debug("exec command received but dispatch is not implemented (#61)")
 		default:
 			slog.Debug("unhandled master message")
 		}
