@@ -75,6 +75,14 @@ function reconcile(desiredStack StackDesiredState):
   report StatusReport to Master
 ```
 
+**Removed stacks.** The per-stack algorithm above only reconciles stacks that are *present* in the
+push. Because the push is the **full** desired state, a stack that has been unassigned or deleted
+simply stops appearing. After processing the push, the agent lists every managed stack on the host
+(by the `orkestra.stack-id` label) and stops + removes any whose ID is no longer in the desired
+state — the same effect as an explicit `REMOVED` status. This is what makes unassign and delete
+converge without leaving zombie containers behind. An empty push therefore removes everything the
+agent manages, which is correct: it means the server has no assignments.
+
 **Interpolation.** `${VAR}` references in the compose file are resolved from the desired state's
 `env_vars` (the assignment's values) and the stack's own `env_file` / `environment` declarations.
 The result is deterministic per assignment and does not depend on what happens to be set in the

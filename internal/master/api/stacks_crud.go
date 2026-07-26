@@ -152,6 +152,11 @@ func (h *StackServiceHandler) DeleteStack(ctx context.Context, req *connect.Requ
 	}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete stack: %w", err))
 	}
+	// Push so agents drop the now soft-deleted stack from their desired state and remove its
+	// containers (ListAssignmentsForServer filters deleted_at).
+	if h.reconcilerFn != nil {
+		h.reconcilerFn()
+	}
 	return connect.NewResponse(&orkestraV1.Empty{}), nil
 }
 

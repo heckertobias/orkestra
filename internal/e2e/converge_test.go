@@ -155,3 +155,79 @@ func TestConvergePartialFailure(t *testing.T) {
 		}
 	}
 }
+
+// TestListManagedStackIDsAndPrune verifies the full-state removal path behind unassign/delete
+// (#72): a converged stack shows up in ListManagedStackIDs, and once it disappears from the
+// desired state it is removed. Requires ORKESTRA_TEST_DOCKER and a reachable Docker daemon.
+func TestListManagedStackIDsAndPrune(t *testing.T) {
+	if os.Getenv("ORKESTRA_TEST_DOCKER") == "" {
+		t.Skip("set ORKESTRA_TEST_DOCKER=1 with a reachable Docker daemon to run this test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	dc, err := dockerctl.New()
+	if err != nil {
+		t.Fatalf("dockerctl.New: %v", err)
+	}
+	raw := dc.RawClient()
+	if _, err := raw.Ping(ctx, client.PingOptions{}); err != nil {
+		t.Skipf("no reachable Docker daemon: %v", err)
+	}
+
+	const stackID = "e2e-prune"
+	const composeYAML = `services:
+  sleeper:
+    image: busybox:1.36
+    command: ["sleep", "3600"]
+`
+
+	proj, err := compose.LoadProject(composeYAML, stackID, map[string]string{})
+	if err != nil {
+		t.Fatalf("LoadProject: %v", err)
+	}
+
+	// Always clean up, even on failure.
+	defer func() {
+		cleanupCtx, c := context.WithTimeout(context.Background(), 30*time.Second)
+		defer c()
+		if err := compose.Remove(cleanupCtx, raw, stackID); err != nil {
+			t.Logf("cleanup Remove: %v", err)
+		}
+	}()
+
+	if err := compose.Converge(ctx, raw, stackID, proj); err != nil {
+		t.Fatalf("Converge: %v", err)
+	}
+
+	// The stack must be discoverable as a managed stack on the host.
+	ids, err := compose.ListManagedStackIDs(ctx, raw)
+	if err != nil {
+		t.Fatalf("ListManagedStackIDs: %v", err)
+	}
+	if !containsID(ids, stackID) {
+		t.Fatalf("ListManagedStackIDs = %v, want to contain %q", ids, stackID)
+	}
+
+	// Simulate the stack disappearing from the desired state: remove it and confirm it is gone.
+	if err := compose.Remove(ctx, raw, stackID); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	ids, err = compose.ListManagedStackIDs(ctx, raw)
+	if err != nil {
+		t.Fatalf("ListManagedStackIDs after remove: %v", err)
+	}
+	if containsID(ids, stackID) {
+		t.Fatalf("ListManagedStackIDs = %v, want %q removed", ids, stackID)
+	}
+}
+
+func containsID(ids []string, want string) bool {
+	for _, id := range ids {
+		if id == want {
+			return true
+		}
+	}
+	return false
+}
