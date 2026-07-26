@@ -7,10 +7,10 @@
 | Rogue Agent connects | mTLS: only certs signed by internal CA are accepted |
 | Bootstrap token leaked | Tokens are short-lived, single-use (configurable), and revocable |
 | Man-in-the-middle on Agent↔Master channel | mTLS mutual authentication + full TLS encryption |
-| Credential stuffing on UI | argon2id hashing, session invalidation, rate limiting |
-| Privilege escalation in UI | RBAC with scoped roles, enforced at Connect middleware layer |
-| Secret exfiltration | Secrets never stored plaintext; never appear in API responses |
-| Audit bypass | All mutations go through audited service methods (not raw DB access) |
+| Credential stuffing on UI | argon2id hashing, configurable password policy, session revocation |
+| Brute force on bootstrap endpoints | Per-IP rate limiting on `Enroll` and the first-run setup endpoint |
+| Privilege escalation in UI | RBAC with scoped roles, enforced in the service layer behind the session interceptor |
+| Secret exfiltration | Secrets never stored plaintext; never appear in list/get responses; reveal requires re-auth and is audited |
 | DB / backup theft | CA private key and secret values are KEK-encrypted; KEK is held in a **separate trust domain** (file/secret-mount, never in the same config as DB credentials) |
 
 ---
@@ -51,34 +51,45 @@ On first start, the Master generates a **self-signed CA** (ECDSA P-384):
 6. Master:
    a. Validates token (hash match, not expired, not over max_uses, not revoked).
    b. Increments used_count.
-   c. Signs the CSR → 1-year client certificate (configurable).
+   c. Assigns the agent ID and signs the CSR with that ID as the certificate CN
+      → 1-year client certificate.
    d. Inserts server record, inserts certificate record.
    e. Returns: EnrollResponse{agent_id, client_cert_pem, ca_bundle_pem}
 
-7. Agent persists:
-   /etc/orkestra/agent/agent.crt  (client cert)
-   /etc/orkestra/agent/agent.key  (private key, chmod 600)
-   /etc/orkestra/agent/ca.crt     (CA bundle for server verification)
-   /etc/orkestra/agent/config.yaml (master address, agent_id)
+7. Agent persists (in ORKESTRA_AGENT_DATA, default /etc/orkestra/agent):
+   agent.crt    (client cert)
+   agent.key    (private key, chmod 600)
+   ca.crt       (CA bundle for server verification)
+   config.json  (master address, agent_id)
 ```
+
+The **Master assigns the identity**: the agent ID is generated server-side and used both as the
+`servers.id` and as the certificate CN, so an agent cannot claim another identity through its CSR
+subject. `Enroll` is the only unauthenticated AgentService RPC and is rate-limited per client IP.
 
 ### Ongoing mTLS
 
 All subsequent connections use **mutual TLS**:
-- Agent presents its client cert (signed by internal CA).
-- Master verifies: cert is signed by CA, CN matches `agent_id`, cert is not revoked.
-- Master presents its server cert (can be a Let's Encrypt cert or the internal CA).
-- Agent verifies: server cert is valid and matches the pinned CA bundle.
+- The Agent presents its client cert (signed by the internal CA); the CN is the agent ID, and every
+  request is attributed to the server row with that ID.
+- The Master verifies: signed by the CA, not revoked. The server cert on `:4440` is issued by the
+  **internal CA** — its SANs always include the loopback names plus everything listed in
+  `ORKESTRA_AGENT_TLS_SANS`.
+- The Agent verifies the Master against the pinned CA bundle it received at enrollment. This is why
+  `:4440` must never be terminated by a public-certificate reverse proxy.
 
-Revocation check: the Master maintains a revocation list in `certificates.revoked`. The check
-happens at connection time (not CRL/OCSP polling). Revoked agents are immediately disconnected.
+Revocation check: the Master keeps the revocation state in `certificates.revoked` and checks it on
+every connection (no CRL/OCSP polling). A revoked agent cannot establish a new stream; an existing
+stream is not actively torn down.
 
 ### Certificate Rotation
 
-- Agent certs are valid for 1 year by default (configurable: `pki.cert_ttl`).
-- The Agent monitors cert expiry and calls `AgentService.RenewCert(csr)` when 30 days remain.
-- `RenewCert` requires the current (not-yet-expired) client cert for authentication.
-- The old cert is revoked after the new one is confirmed active.
+- Agent certs are valid for 1 year.
+- Before each connection attempt the Agent checks its cert and calls `AgentService.RenewCert(csr)`
+  when less than 30 days of validity remain.
+- `RenewCert` requires the current (not-yet-expired) client cert for authentication and re-signs
+  with the same CN, so the agent keeps its identity.
+- Each issuance appends a row to `certificates`; the previous cert stays valid until it expires.
 
 ---
 
@@ -86,33 +97,42 @@ happens at connection time (not CRL/OCSP polling). Revoked agents are immediatel
 
 ### Local Users (Default)
 
-- Passwords hashed with **argon2id** (params: memory=64MB, iterations=3, parallelism=4).
-- First-run setup: if no users exist, Master prints a one-time setup URL to stdout.
-  Operator opens URL, sets admin username + password. URL expires after 30 minutes.
-- Sessions use a **random 256-bit session token** stored in an `HttpOnly; SameSite=Lax` cookie.
-  The `Secure` attribute is added by default (`ORKESTRA_SECURE_COOKIES`, on unless explicitly
-  disabled for plain-HTTP local dev) — the same applies to the transient OIDC `state` cookie.
-  Token is stored as SHA-256 in the `sessions` table (raw token never persisted).
-- Session TTL: 8 hours idle, 7 days absolute (configurable).
+- Passwords are hashed with **argon2id** (memory 64 MB, time 1, parallelism 4, 16-byte salt,
+  32-byte key — the OWASP minimum), stored in PHC format so the parameters travel with the hash and
+  can be raised later without invalidating existing hashes.
+- **First-run setup:** if no users exist, the Master generates a one-time setup token and logs the
+  setup URL (`<public URL>/login?setup=<token>`). Opening it creates the first admin. The token
+  lives in memory only, is invalidated the moment the admin is created, and a new one is generated
+  on the next start as long as no user exists. `/api/setup` is rate-limited per IP.
+- **Invite instead of assigned passwords:** creating a user does not set a password. The user gets
+  an invite link (valid 72 h) and chooses their own password, which is checked against the password
+  policy. The same mechanism backs admin-triggered "send password link" and self-service password
+  reset (valid 1 h). All of these require SMTP to be configured.
+- **Password policy:** min length and min/max counts for special characters, digits, upper and
+  lower case, configurable in the UI (Settings → Password policy) and enforced on every path that
+  sets a password. `0` means "no limit".
+- Sessions use a **random session token** delivered in an `HttpOnly; SameSite=Lax` cookie. The
+  `Secure` attribute is on by default (`ORKESTRA_SECURE_COOKIES`; disable only for plain-HTTP local
+  dev) — the same applies to the transient OIDC `state` cookie. Only the SHA-256 of the token is
+  stored in `sessions`; the raw token is never persisted.
+- Session lifetime: 24 hours. Logout revokes the session row and clears the cookie.
 
 ### OIDC (Optional)
 
-Configuration stored in `oidc_config` (encrypted client secret):
+OIDC is configured **at runtime in the UI** (*Settings → OIDC*, admin only) and stored in the
+`oidc_config` table — there is no config file. Saving the form reloads the provider immediately, so
+no Master restart is needed.
 
-```yaml
-auth:
-  oidc:
-    enabled: true
-    issuer_url: "https://sso.example.com/realms/myrealm"
-    client_id: "orkestra"
-    client_secret: "${BAO_SECRET}"  # or plain value
-    scopes: ["openid", "profile", "email", "groups"]
-    claim_mapping:
-      groups:
-        "orkestra-admins": "admin"
-        "orkestra-ops":    "operator"
-        "orkestra-view":   "viewer"
-```
+| Field | Meaning |
+|---|---|
+| `enabled` | Turns the "Login with SSO" button and the `/auth/oidc/*` routes on |
+| `issuer_url` | e.g. `https://sso.example.com/realms/myrealm` (discovery document is fetched from it) |
+| `client_id` / `client_secret` | The secret is write-only in the API and KEK-encrypted at rest |
+| `scopes` | Default `openid`, `profile`, `email`; add `groups` if you map roles |
+| `groups_claim` | Which token claim holds group membership (default `groups`) |
+| `claim_mapping` | Group value → orkestra role, e.g. `orkestra-admins → admin` |
+
+A local Keycloak realm for testing lives in `dev/keycloak/`.
 
 The redirect URI registered at the IdP must be `<public URL>/auth/oidc/callback`. Behind TLS the
 Master must know its `https://` public origin so the `redirect_uri` matches the registration —
@@ -163,12 +183,13 @@ subsequent SSO login re-authenticates silently (standard OIDC). Admins must regi
 post-logout redirect URIs at the IdP (e.g. Keycloak client attribute `post.logout.redirect.uris`),
 otherwise the IdP ends the session but will not redirect the browser back.
 
-### CSRF Protection
+### API Keys
 
-All mutating API requests (non-GET Connect RPCs) require a `X-CSRF-Token` header containing a
-CSRF token derived from the session. The browser SPA includes it automatically. Pure API clients
-(non-browser) authenticate with an **API key** (a `Bearer` token, stored SHA-256-hashed) instead
-of a session cookie, which sidesteps CSRF entirely.
+Non-browser clients authenticate with an **API key** instead of a session cookie: a `Bearer` token
+that is shown once at creation and stored SHA-256-hashed in `api_keys`. A key inherits the role
+bindings of the user it belongs to, can carry an expiry, and can be revoked. Users manage their own
+keys under *Settings → API keys*; the typical consumer is a Prometheus scrape job hitting
+`/api/agents/{id}/metrics`.
 
 ---
 
@@ -178,26 +199,40 @@ of a session cookie, which sidesteps CSRF entirely.
 
 | Role | Permissions |
 |---|---|
-| `admin` | Full access: manage users, roles, servers, stacks, secrets, tokens, OIDC config |
-| `operator` | Deploy, start, stop, restart, pull, view logs/stats; create stacks; manage own secrets |
-| `viewer` | Read-only: view servers, stacks, containers, logs, stats. Cannot see secret values. |
+| `admin` | Full access: users, roles, servers, stacks, secrets, enrollment tokens, OIDC/SMTP/server config, audit log |
+| `operator` | Create and edit stacks, assign/unassign/roll back, control containers, view logs and stats |
+| `viewer` | Read-only: servers, stacks, containers, logs, stats. Never secret values. |
+| `secrets-manager` | Create, update, delete, and reveal secrets. Grants no access to servers or stacks. |
 
 ### Role Bindings
 
-Bindings can be:
-- **Global:** user has the role for all resources.
-- **Server-scoped:** user has the role only for a specific server (and its stacks).
-- **Stack-scoped:** user has the role only for a specific stack (across all servers it's deployed to).
+A binding is `(user, role, server?, stack?)`. An empty scope means "any":
+
+- **Global:** no server and no stack → the role applies everywhere.
+- **Server-scoped:** the role applies to that server and the stacks deployed on it.
+- **Stack-scoped:** the role applies to that stack (optionally only on one server).
+
+For a given `(server, stack)` pair, the **highest matching role wins** (`viewer` < `operator` <
+`admin`). `secrets-manager` sits outside that ladder: it is checked separately and deliberately
+does not grant server or stack visibility.
+
+Stack visibility is derived from assignments: an unassigned stack is visible to any operator (so it
+can be assigned in the first place), while an assigned stack requires access on at least one of the
+servers it runs on. Deleting a stack requires operator access on **all** servers it is assigned to.
 
 ### Enforcement
 
-RBAC is enforced as a **Connect interceptor** (`internal/master/auth/rbac_interceptor.go`) that:
-1. Extracts the authenticated user from the request context (set by the session interceptor).
-2. Looks up the user's effective roles for the target resource.
-3. Returns `connect.CodePermissionDenied` if insufficient.
+Enforcement happens in two layers:
 
-Raw database access (repositories) does **not** enforce RBAC — it is the service layer's
-responsibility. This is intentional: the interceptor is the single enforcement point.
+1. A **session interceptor** resolves the session cookie or `Bearer` API key into a user context
+   (including all role bindings) and rejects unauthenticated calls to non-public procedures.
+2. Every service method then asks the RBAC helpers in `internal/master/auth` (`IsAdmin`,
+   `CanViewOn`, `CanOperateOn`, `CanViewStack`, `CanManageSecrets`, …) and returns
+   `connect.CodePermissionDenied` when the answer is no. List endpoints filter rather than fail.
+
+Raw database access (the store package) does **not** enforce RBAC — that is the service layer's
+job, and it is the single enforcement point. The SPA mirrors the same rules for gating UI elements
+(`web/src/lib/rbacMatrix.ts`), but that is cosmetic: the server decides.
 
 ---
 
@@ -205,39 +240,50 @@ responsibility. This is intentional: the interceptor is the single enforcement p
 
 | Endpoint | TLS | Auth |
 |---|---|---|
-| `:4440` (Agent gRPC) | mTLS (required) | Client cert (signed by internal CA) |
-| `:8080` (UI + API) | TLS (server-only, or reverse proxy) | Session cookie / API key |
-| `:9090` (Prometheus metrics) | None (bind loopback by default) | — |
+| `:4440` (Agent gRPC) | mTLS, terminated by the Master (required) | Client cert signed by the internal CA |
+| `:8080` (UI + API) | Plain HTTP — terminate TLS at a reverse proxy | Session cookie or `Bearer` API key |
+| `:9090` (Prometheus metrics, Master) | None | None — bind to loopback or firewall it |
+| `:9091` (Prometheus metrics, Agent) | None | None — local only; federated through the Master |
 
-For `:8080`, it is recommended to terminate TLS at a reverse proxy (nginx/Caddy/Traefik) with
-a proper certificate (Let's Encrypt). The Master can also serve TLS directly with a configured
-cert.
+The Master does **not** serve TLS on the UI port itself: put nginx / Caddy / Traefik in front of
+`:8080` and terminate a real certificate (e.g. Let's Encrypt) there. `:4440` is the opposite case —
+it must reach the Master undecrypted, because agents pin the internal CA (see
+[08-deployment.md](08-deployment.md) § "Ingress & Networking").
 
 ---
 
 ## 5. Audit Log
 
-Every mutating action writes an `audit_log` entry:
+Mutating actions write an `audit_log` entry through the service layer:
 
 ```go
-type AuditEntry struct {
-    Actor      string      // user ID or "system"
-    ActorName  string
-    Action     string      // "stack.deploy", "secret.update", "server.delete", ...
-    TargetType string
-    TargetID   string
-    Before     interface{} // JSON-marshallable snapshot (sensitive fields redacted)
-    After      interface{}
-    IPAddress  string
-    Error      string      // if the action failed
+store.InsertAuditLogParams{
+    Ts:         …,          // Unix ms
+    ActorID:    …,          // acting user
+    ActorName:  …,
+    Action:     "secret.reveal",   // dotted verb
+    TargetType: "secret",          // "user" | "secret" | ...
+    TargetID:   …,
+    BeforeJson: …, AfterJson: …,   // optional snapshots
+    IPAddress:  …,
+    Error:      …,          // set when the action failed
 }
 ```
 
-Secret values are **always redacted** in audit entries (replaced with `"[REDACTED]"`).
+Covered today:
 
-The audit log is append-only from the application's perspective; the DB user running the Master
-has INSERT permission only on `audit_log` (enforced by not exposing a `DELETE` method in the
-repository). Operators with DBA access can query it directly; the UI provides a searchable view.
+| Area | Actions |
+|---|---|
+| Authentication | `auth.login`, `auth.logout`, `auth.change_password` |
+| Users | `user.create`, `user.delete`, `user.update_profile`, `user.email_changed`, `user.send_password_link` |
+| Secrets | `secret.create`, `secret.update`, `secret.delete`, `secret.reveal` |
+
+Stack, assignment, server, and role-binding mutations are not audited yet — that gap is worth
+keeping in mind when using the audit log for change tracking.
+
+Secret values never appear in audit entries. The log is append-only from the application's
+perspective: there is no delete or update path in the store, only `InsertAuditLog`. The UI provides
+a searchable view for admins.
 
 ---
 
@@ -245,9 +291,10 @@ repository). Operators with DBA access can query it directly; the UI provides a 
 
 ### Why the KEK Must Be in a Separate Trust Domain
 
-The KEK (Key-Encrypting Key) protects three things *at rest* in the database: the CA private key,
-builtin secret ciphertexts, and the OIDC client secret. Its purpose is to make a DB dump or backup
-useless on its own — an attacker with only the database still cannot read the encrypted material.
+The KEK (Key-Encrypting Key) protects four things *at rest* in the database: the CA private key,
+built-in secret ciphertexts, the OIDC client secret, and the SMTP password. Its purpose is to make
+a DB dump or backup useless on its own — an attacker with only the database still cannot read the
+encrypted material.
 
 **This protection is void if the KEK lives alongside the DB credentials** (e.g. same `.env` file
 or Compose `environment:` block). Whoever has the config has both. The KEK only provides real
@@ -269,9 +316,10 @@ Auto-selection priority: `ORKESTRA_MASTER_KEY_FILE` set → **file** source; els
 | Source | Env var / config | Notes |
 |---|---|---|
 | **file** *(recommended)* | `ORKESTRA_MASTER_KEY_FILE=/run/secrets/orkestra_master_key` | Docker/K8s `secrets:` mount (tmpfs) or a root-only `chmod 600` file. Value never appears in config. Allows unattended restart. |
-| **env** *(dev/test only)* | `ORKESTRA_MASTER_KEY=<hex>` | Logs a warning on startup. Acceptable for local dev; not recommended in production. |
-| **interactive** *(planned)* | — | Master starts "sealed"; operator enters key at runtime via TTY prompt or an unseal endpoint. Nothing persisted. Breaks auto-restart. |
-| **kms** *(planned)* | `ORKESTRA_KEY_SOURCE=kms` | KEK is wrapped by an external KMS (OpenBao Transit or Cloud KMS); unwrapped at boot via API. No plaintext at rest, unattended restart works. |
+| **env** *(dev/test only)* | `ORKESTRA_MASTER_KEY=<hex>` | Logs a warning on startup. Acceptable for local dev; not for production. |
+
+The interface exists so further sources (an interactive "sealed start", or a KMS that unwraps the
+KEK at boot) can be added without touching call sites. Only `file` and `env` are implemented.
 
 ### Deployment Rule
 
@@ -288,8 +336,10 @@ it as a Docker/K8s `secret:` (mounted as tmpfs), a systemd `LoadCredential`, or 
 - [x] KEK is a random 256-bit value, backed up separately from the database (password manager / HSM).
 - [x] PostgreSQL access is restricted to the `orkestra` DB user; TLS is enforced on the connection.
 - [x] Port `:4440` is firewalled to Agent IPs only (or the Master is on a private network).
-- [x] Port `:9090` is bound to loopback or protected by a scrape-IP allowlist.
-- [x] TLS cert on `:8080` is valid (Let's Encrypt or internal PKI).
+- [x] Port `:9090` (and the agents' `:9091`) is bound to loopback or protected by a scrape-IP
+      allowlist — the metrics endpoints are unauthenticated.
+- [x] A reverse proxy terminates a valid TLS certificate in front of `:8080`, and
+      `ORKESTRA_SECURE_COOKIES` is left at its default (`true`).
 - [x] Bootstrap tokens are single-use and have short TTLs (< 1 hour).
 - [x] Agent hosts' `/var/run/docker.sock` is accessible only to the `orkestra-agent` user.
 - [x] Regular backups of the PostgreSQL database (`pg_dump`) and the KEK stored **separately**.

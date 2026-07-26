@@ -26,13 +26,10 @@ services:
         condition: service_healthy
     ports:
       - "4440:4440"   # Agent gRPC (mTLS) — 4440 = orchestra concert pitch A440
-      - "8080:8080"   # Web UI + API
+      - "8080:8080"   # Web UI + API — plain HTTP, put a TLS-terminating reverse proxy in front
       - "9090:9090"   # Prometheus metrics (restrict at firewall — do not expose publicly)
     secrets:
       - orkestra_master_key
-    # Uncomment to provide a TLS cert for the UI endpoint:
-    # volumes:
-    #   - ./tls:/tls:ro
     environment:
       # KEK is read from the secret mount — never set ORKESTRA_MASTER_KEY here
       ORKESTRA_MASTER_KEY_FILE: /run/secrets/orkestra_master_key
@@ -41,8 +38,11 @@ services:
       ORKESTRA_UI_ADDR: "0.0.0.0:8080"
       ORKESTRA_METRICS_ADDR: "0.0.0.0:9090"
       ORKESTRA_LOG_LEVEL: info
-      # ORKESTRA_TLS_CERT: /tls/server.crt
-      # ORKESTRA_TLS_KEY:  /tls/server.key
+      # Browser-facing base URL — required for OIDC, email links, and the setup link.
+      # ORKESTRA_PUBLIC_URL: https://orkestra.example.com
+      # Session/OIDC cookies carry the Secure attribute by default (HTTPS only).
+      # Set to false ONLY for direct plain-HTTP access (local dev).
+      # ORKESTRA_SECURE_COOKIES: "true"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
       interval: 30s
