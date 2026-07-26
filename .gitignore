@@ -30,6 +30,9 @@ web/src/routeTree.gen.ts
 .vscode/
 *.swp
 
+# Claude Code — personal, per-machine settings (shared settings.json stays tracked)
+.claude/settings.local.json
+
 # OS
 .DS_Store
 Thumbs.db
