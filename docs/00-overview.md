@@ -26,7 +26,7 @@ flowchart TB
     REC["Reconciler / Scheduler"]
     GW["Agent-gRPC endpoint"]
     STORE[("Store (Postgres)<br/>+ CA / PKI")]
-    SEC["Secret store<br/>(built-in; OpenBao planned)"]
+    SEC["Secret store<br/>(built-in, KEK-encrypted)"]
     API <--> REC
     REC --- STORE
     GW --- STORE
@@ -64,15 +64,15 @@ flowchart TB
 |---|---|---|
 | Backend language | **Go** (≥ 1.24) | Single binary, official Docker SDK, `compose-go`, cloud-native ecosystem |
 | RPC / API | **ConnectRPC** (`connectrpc.com/connect`) | One protobuf schema serves Agents (gRPC/HTTP2, bidi-stream) **and** browsers (Connect/JSON + server-streaming). No separate gRPC-web proxy needed |
-| Docker control | `github.com/docker/docker/client` (Engine API) | Direct control without CLI subprocess |
+| Docker control | `github.com/moby/moby/client` (Engine API) | Direct control without CLI subprocess |
 | Compose | `github.com/compose-spec/compose-go/v2` | Official Compose parser → `types.Project` |
-| Persistence | **PostgreSQL** + **sqlc** (pgx/v5) for type-safe SQL | External DB; robust concurrency, JSONB indexes, `LISTEN/NOTIFY` for reconciler |
-| Migrations | `pressly/goose` | Versioned schema migrations |
+| Persistence | **PostgreSQL** + **sqlc** (pgx/v5) for type-safe SQL | External DB; robust concurrency, JSONB columns |
+| Migrations | `pressly/goose` | Versioned schema migrations, applied automatically at Master start |
 | Auth (users) | local: `argon2id`; OIDC: `coreos/go-oidc` + `golang.org/x/oauth2` | Local as default, OIDC optional |
-| Secrets | built-in encrypted store (XChaCha20-Poly1305 + KEK); OpenBao backend planned | Built-in works today; pluggable backend designed for later (see [#23](https://github.com/heckertobias/orkestra/issues/23)) |
+| Secrets | built-in encrypted store (XChaCha20-Poly1305 + KEK) | Values are sealed with the KEK before they are persisted |
 | Logging | `log/slog` (stdlib) | Structured logs |
-| Metrics | `prometheus/client_golang` | `/metrics` on Master & Agent |
-| Frontend | **React** + TypeScript + Vite; `@connectrpc/connect-web`; TanStack Query; Tailwind | SPA against Connect API; generated TS clients from protobuf |
+| Metrics | `prometheus/client_golang` | `/metrics` on Master & Agent; agent metrics federate through the Master |
+| Frontend | **React 19** + TypeScript + Vite; TanStack Router + Query; Tailwind v4 | SPA against the Connect API (JSON over HTTP) |
 | Codegen | `buf` for protobuf (Go + TypeScript) | One schema, both languages |
 | Packaging | `goreleaser`; systemd units; Docker image | Single-binary distribution |
 
@@ -91,4 +91,4 @@ one artifact that serves both the API and the UI.
 - [06-security-auth.md](06-security-auth.md) — PKI/mTLS, User Auth, RBAC, Audit
 - [07-web-ui.md](07-web-ui.md) — UI pages & frontend stack
 - [08-deployment.md](08-deployment.md) — Observability & deployment
-- [Roadmap (GitHub issues)](https://github.com/heckertobias/orkestra/issues?q=is%3Aopen+label%3Aroadmap) — planned features & known gaps
+- [09-updates.md](09-updates.md) — Fleet update model (layers, policies, reported availability)

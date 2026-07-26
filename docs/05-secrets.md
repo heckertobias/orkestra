@@ -2,8 +2,8 @@
 
 > **Scope of this document.** It describes what the secrets subsystem does **today**: a built-in
 > encrypted secret store with CRUD, reveal-with-reauth, and audit. Two larger pieces are designed
-> but **not yet implemented** — delivering secrets into running deployments (materialization) and
-> the OpenBao backend. Those live in [#22](https://github.com/heckertobias/orkestra/issues/22) and [#23](https://github.com/heckertobias/orkestra/issues/23).
+> but **not implemented yet** — delivering secrets into running deployments (materialization) and
+> an external secrets backend.
 
 ## Design Goals
 
@@ -11,8 +11,8 @@
 - **No plaintext in API responses** — list/get return metadata only; the value is returned solely
   by an explicit, re-authenticated `RevealSecret` call.
 - **Full audit** — every create/update/delete/reveal is written to `audit_log`.
-- **Pluggable backends (planned)** — a `provider` column already distinguishes `builtin` from
-  `openbao`, but only the built-in provider is implemented today.
+- **Room for a second backend** — a `provider` column already distinguishes `builtin` from
+  `openbao`, but only the built-in provider is implemented.
 
 ---
 
@@ -41,7 +41,7 @@ Implemented in `internal/master/api/secrets.go`. All mutating calls require the
 | `UpdateSecret` | Re-seals a new `value_bytes` (if provided) and/or updates the description. |
 | `DeleteSecret` | Refused with `FailedPrecondition` while the secret still has active bindings. |
 | `RevealSecret` | Requires a re-authentication password (verified against the caller's stored hash); `builtin` only; returns the plaintext once. Audit-logged. |
-| `MigrateProvider` | Currently returns `CodeUnimplemented` (built-in → OpenBao migration is planned). |
+| `MigrateProvider` | Returns `CodeUnimplemented` — there is no second provider to migrate to. |
 
 ### UI behaviour
 
@@ -78,12 +78,11 @@ into which service and how:
 
 `service_name: ""` means the binding applies to all services in the stack.
 
-> ⚠️ **Not yet wired into deployments.** The Master currently writes `secret_refs` as an empty
-> array (`internal/master/api/stacks_crud.go`) and the reconciler does **not** resolve secrets into
-> `ApplyDesiredState`, so bound secrets do not reach containers yet. The end-to-end path
-> (resolution → `ResolvedSecret` over mTLS → agent-side ENV/FILE/DOCKER_SECRET materialization →
-> cleanup on stop/remove) plus a bindings editor are tracked in
-> [#22](https://github.com/heckertobias/orkestra/issues/22).
+> ⚠️ **Not wired into deployments yet.** The Master writes `secret_refs` as an empty array
+> (`internal/master/api/stacks_crud.go`) and the reconciler does **not** resolve secrets into
+> `ApplyDesiredState`, so bound secrets do not reach containers. The end-to-end path — resolution →
+> `ResolvedSecret` over mTLS → agent-side ENV/FILE/DOCKER_SECRET materialization → cleanup on
+> stop/remove — plus a bindings editor in the UI are still open.
 
 ---
 
@@ -102,8 +101,7 @@ the encryption provides no protection.
 ## Known limitations
 
 - **Secrets are not delivered to deployments yet** — see the binding note above.
-- **OpenBao is not implemented** — the `openbao` provider value and `bao_*` columns exist, but there
-  is no code that reads/writes OpenBao, and `RevealSecret`/`MigrateProvider` reject it.
-- **No value history / native rotation** in the built-in store (planned alongside OpenBao KV v2).
-
-All three are tracked in [#22](https://github.com/heckertobias/orkestra/issues/22) and [#23](https://github.com/heckertobias/orkestra/issues/23).
+- **OpenBao is not implemented** — the `openbao` provider value and the `bao_*` columns exist as
+  schema, but no code reads or writes OpenBao, and `RevealSecret` / `MigrateProvider` reject it.
+- **No value history and no native rotation** in the built-in store: updating a secret bumps
+  `version` and replaces the ciphertext; the previous value is gone.

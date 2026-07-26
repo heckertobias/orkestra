@@ -4,19 +4,17 @@
 
 ### Logging
 
-Both the Master and Agent use **`log/slog`** (Go stdlib structured logging).
+Both the Master and Agent use **`log/slog`** (Go stdlib structured logging) with the text handler,
+writing to stderr — under systemd that lands in the journal (`SyslogIdentifier=orkestra-master` /
+`orkestra-agent`), under Docker in the container log.
 
-- **Development:** human-readable text format (`slog.TextHandler`).
-- **Production:** JSON format (`slog.JSONHandler`) — parseable by Loki, Fluentd, etc.
-
-Log level is configurable via `--log-level` flag or `ORKESTRA_LOG_LEVEL` env var
+Log level is configurable via the `--log-level` flag or the `ORKESTRA_LOG_LEVEL` env var
 (`debug | info | warn | error`; default: `info`).
 
-Key log fields used consistently:
-- `component`: `master.agentgw`, `master.reconciler`, `agent.reconcile`, `agent.dockerctl`, etc.
-- `agent_id`: on all Agent-related log lines in the Master.
-- `stack_id`: on reconcile-related lines.
-- `request_id`: on gRPC stream message processing.
+Recurring structured fields:
+- `agent_id` — on agent-related lines in the Master.
+- `stack_id`, `service` — on reconcile and converge lines in the Agent.
+- `err` — on every error line.
 
 ### Metrics (Prometheus)
 
@@ -79,7 +77,7 @@ Master's agent port `4440`.
 | Endpoint | Description |
 |---|---|
 | `GET /healthz` | Liveness: always 200 if process is running |
-| `GET /readyz` | Readiness: 200 if DB is reachable + CA is loaded + gRPC endpoint is up |
+| `GET /readyz` | Readiness: 200 if the database responds to a ping, else 503 |
 
 ---
 
@@ -171,28 +169,36 @@ services:
         condition: service_healthy
     ports:
       - "4440:4440"   # Agent gRPC (mTLS) — 4440 = orchestra concert pitch A440
-      - "8080:8080"   # Web UI + API
+      - "8080:8080"   # Web UI + API (put a TLS-terminating reverse proxy in front)
+      - "9090:9090"   # Prometheus metrics — restrict at the firewall, never expose publicly
     secrets:
       - orkestra_master_key
-    # Uncomment to provide a TLS cert for the UI endpoint:
-    # volumes:
-    #   - ./tls:/tls:ro
     environment:
       # KEK is read from the secret mount — never set ORKESTRA_MASTER_KEY here
       ORKESTRA_MASTER_KEY_FILE: /run/secrets/orkestra_master_key
       ORKESTRA_DATABASE_URL: "postgres://orkestra:${POSTGRES_PASSWORD}@postgres:5432/orkestra?sslmode=disable"
       ORKESTRA_AGENT_ADDR: "0.0.0.0:4440"
       ORKESTRA_UI_ADDR: "0.0.0.0:8080"
+      ORKESTRA_METRICS_ADDR: "0.0.0.0:9090"
       ORKESTRA_LOG_LEVEL: info
+      # Browser-facing base URL — required for OIDC, email links, and the setup link.
+      # ORKESTRA_PUBLIC_URL: https://orkestra.example.com
       # Session/OIDC cookies carry the Secure attribute by default (HTTPS only).
       # Set to false ONLY for direct plain-HTTP access (local dev).
       # ORKESTRA_SECURE_COOKIES: "true"
-      # ORKESTRA_TLS_CERT: /tls/server.crt
-      # ORKESTRA_TLS_KEY:  /tls/server.key
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   postgres-data:
 ```
+
+The Master serves the UI port over plain HTTP; TLS for the browser is terminated by a reverse proxy
+in front of `:8080` (see *Ingress & Networking* below).
 
 The KEK lives in `secrets/master_key` — a `chmod 600` file that Docker mounts as tmpfs under
 `/run/secrets/orkestra_master_key`. It never appears in `environment:` or `.env`. The DB password
@@ -222,7 +228,7 @@ docker compose logs master | grep "setup"
 
 ```ini
 [Unit]
-Description=orkestra Master
+Description=orkestra Master — Docker Orchestration Control Plane
 After=network-online.target
 Wants=network-online.target
 
@@ -230,14 +236,21 @@ Wants=network-online.target
 Type=simple
 User=orkestra
 Group=orkestra
-ExecStart=/usr/local/bin/orkestra-master
-EnvironmentFile=/etc/orkestra/master/env
+ExecStart=/usr/bin/orkestra-master
+EnvironmentFile=-/etc/orkestra/master/env
 Restart=on-failure
 RestartSec=5s
+
+# Hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/orkestra
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictRealtime=true
 
 [Install]
 WantedBy=multi-user.target
@@ -248,7 +261,9 @@ WantedBy=multi-user.target
 ORKESTRA_DATABASE_URL=postgres://orkestra:<password>@localhost:5432/orkestra?sslmode=disable
 ORKESTRA_AGENT_ADDR=0.0.0.0:4440
 ORKESTRA_UI_ADDR=0.0.0.0:8080
+ORKESTRA_METRICS_ADDR=127.0.0.1:9090
 ORKESTRA_MASTER_KEY_FILE=/etc/orkestra/master/master.key
+ORKESTRA_PUBLIC_URL=https://orkestra.example.com
 # Secure cookies are on by default; set false only for direct plain-HTTP access (local dev).
 # ORKESTRA_SECURE_COOKIES=true
 ```
@@ -334,10 +349,9 @@ The Master and an Agent can run on the same host without conflict:
 - **Docker socket:** only the Agent needs `/var/run/docker.sock`; the Master never touches Docker.
 - **Loopback works out of the box:** a co-located agent enrolls with
   `--master https://localhost:4440` — loopback SANs are always present.
-- **Caution:** a co-located agent controls the host's Docker daemon. If you assign it a stack
-  that includes the Master's own containers, the agent could recreate/stop the Master. Keep the
-  Master's stack off the co-located agent until fleet-managed self-updates land (see
-  [#9](https://github.com/heckertobias/orkestra/issues/9)).
+- **Caution:** a co-located agent controls the host's Docker daemon. If you assign it a stack that
+  includes the Master's own containers, the agent can recreate or stop the Master underneath
+  itself. Keep the Master's own stack off the co-located agent.
 
 ---
 
@@ -353,16 +367,18 @@ The Master and an Agent can run on the same host without conflict:
 #   --master https://master.example.com:4440 \
 #   --bootstrap-token <token> \
 #   --name "web-server-01" \
-#   [--version latest]
+#   [--version latest] \
+#   [--data-dir /etc/orkestra/agent]
 
 # Steps:
 # 1. Detect OS/arch
-# 2. Download orkestra-agent binary from GitHub Releases
-# 3. Verify checksum
-# 4. Place at /usr/local/bin/orkestra-agent
+# 2. Download the orkestra-agent archive from GitHub Releases
+# 3. Verify the checksum
+# 4. Install the binary and create directories + service user
 # 5. Run: orkestra-agent enroll --master $MASTER --bootstrap-token $TOKEN --name $NAME
-# 6. Install systemd service
-# 7. Enable + start service
+# 6. Write the env file and install the systemd unit
+#    (prefers a non-root user when a 'docker' group exists)
+# 7. Enable + start the service
 ```
 
 ### Agent Systemd Unit
@@ -371,17 +387,29 @@ The Master and an Agent can run on the same host without conflict:
 
 ```ini
 [Unit]
-Description=orkestra Agent
-After=docker.service
-Wants=docker.service
+Description=orkestra Agent — Docker Host Controller
+After=docker.service network-online.target
+Wants=docker.service network-online.target
 
 [Service]
 Type=simple
 User=root                        # needs docker.sock access
-ExecStart=/usr/local/bin/orkestra-agent serve
-EnvironmentFile=/etc/orkestra/agent/env
+ExecStart=/usr/bin/orkestra-agent serve
+EnvironmentFile=-/etc/orkestra/agent/env
 Restart=on-failure
 RestartSec=10s
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/orkestra /etc/orkestra/agent /run/docker.sock /var/run/docker.sock
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictRealtime=true
+LockPersonality=true
 
 [Install]
 WantedBy=multi-user.target
@@ -389,10 +417,17 @@ WantedBy=multi-user.target
 
 `/etc/orkestra/agent/env`:
 ```
-ORKESTRA_MASTER_ADDR=https://master.example.com:4440
 ORKESTRA_AGENT_DATA=/etc/orkestra/agent
+ORKESTRA_AGENT_METRICS_ADDR=127.0.0.1:9091
 ORKESTRA_LOG_LEVEL=info
+# Only needed for container auto-enrolment (see below):
+# ORKESTRA_MASTER_ADDR=https://master.example.com:4440
+# ORKESTRA_BOOTSTRAP_TOKEN=<token>
+# ORKESTRA_AGENT_NAME=web-01
 ```
+
+The master address the agent dials is stored in `config.json` at enrollment time, so a normally
+enrolled agent does not need `ORKESTRA_MASTER_ADDR` in its env file.
 
 > **Note on `User=root`:** The Agent needs `/var/run/docker.sock` access. If the Docker socket
 > is accessible to a `docker` group, `User=orkestra` with `SupplementaryGroups=docker` is
@@ -425,15 +460,23 @@ app* (with a labeled install form) live under [`deploy/truenas/`](../deploy/true
 - `orkestra-agent_linux_amd64`
 - `orkestra-agent_linux_arm64`
 
-**Archives:** `.tar.gz` with binary + systemd units + install script.
+**Archives:** `.tar.gz` with the binary, systemd unit, and default env file.
 
-**Docker images:**
+**Packages:** `.deb` and `.rpm` for both binaries (amd64 + arm64), installing the systemd unit, a
+default `/etc/orkestra/<tool>/env`, and a system user where needed.
+
+**Docker images (multi-arch manifests, amd64 + arm64):**
 - `ghcr.io/heckertobias/orkestra-master:{version}`
-- Multi-arch manifest (amd64 + arm64)
+- `ghcr.io/heckertobias/orkestra-agent:{version}`
 
 **CI (GitHub Actions, `.github/workflows/`):**
 
-Pipeline jobs: `build` + `test` + `lint` (push + PR) → `release` (tag `v*` only).
+| Workflow | Jobs |
+|---|---|
+| `ci.yml` (push + PR) | `build-test` (codegen, `go vet`, `go test`, build) · `lint` (golangci-lint, buf lint) · `frontend` (npm build, eslint, vitest) · `integration` (tests against Postgres + Docker) |
+| `codeql.yml` | CodeQL analysis |
+| `release.yml` (tag `v*`) | goreleaser: binaries, archives, packages, images |
+| `pages.yml` | Publishes the signed apt/rpm repository to GitHub Pages |
 
 ---
 
@@ -444,8 +487,8 @@ Pipeline jobs: `build` + `test` + `lint` (push + PR) → `release` (tag `v*` onl
 | Item | How | Frequency | Note |
 |---|---|---|---|
 | PostgreSQL database | `pg_dump` (see below) | Daily (at minimum) | — |
-| KEK (master key file) | Copy `secrets/master_key` or `/etc/orkestra/master/master.key` | On creation; keep in password manager / HSM | Must be stored **separately** from the DB backup |
-| TLS certs (if self-managed) | Copy `/etc/orkestra/master/tls/` | On renewal | — |
+| KEK (master key file) | Copy `secrets/master_key` or `/etc/orkestra/master/master.key` | On creation; keep in a password manager / HSM | Must be stored **separately** from the DB backup |
+| Reverse-proxy TLS certs | Whatever your proxy uses | On renewal | Not managed by orkestra |
 
 ### Recovery Procedure
 
