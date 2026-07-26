@@ -442,9 +442,14 @@ function PermissionsMatrix({
   }
 
   function patchRow(idx: number, patch: Partial<MatrixRow>) {
+    // Editing a server's access is an explicit choice that overrides any hidden grants the matrix
+    // couldn't show, so drop this row's passthrough. Merely expanding/collapsing does not (#50).
+    const clearsPassthrough = 'role' in patch || 'stackIds' in patch
     setMatrix(m => ({
       ...m,
-      rows: m.rows.map((r, i) => i === idx ? { ...r, ...patch } : r),
+      rows: m.rows.map((r, i) =>
+        i === idx ? { ...r, ...patch, ...(clearsPassthrough ? { passthrough: [] } : {}) } : r,
+      ),
     }))
   }
 
@@ -795,6 +800,15 @@ function MatrixRowComp({
             </span>
           ) : (
             row.serverName
+          )}
+          {row.passthrough.length > 0 && (
+            <span
+              className="block text-[10px] mt-1 italic"
+              style={{ color: 'var(--text-muted)' }}
+              title="This user has grants on this server that this single-role view can't display (e.g. a server-wide viewer alongside a stack-scoped operator). They are kept as-is unless you change this row."
+            >
+              +{row.passthrough.length} grant{row.passthrough.length > 1 ? 's' : ''} not shown — kept on save
+            </span>
           )}
         </td>
 

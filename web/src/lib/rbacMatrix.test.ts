@@ -221,13 +221,59 @@ describe('round trip', () => {
     ])
   })
 
-  it('DOWNGRADE: a server-wide viewer is lost when a stack-scoped operator exists', () => {
-    // The matrix models exactly one role per server, so "viewer everywhere on s1 plus
-    // operator on st-a" cannot be represented: the row becomes operator/[st-a] and the
-    // server-wide viewer grant disappears on save. The user silently loses view access
-    // to st-b. Asserted here to pin the behaviour, not to endorse it — see issue #50.
-    expect(roundTrip([binding('viewer', 's1'), binding('operator', 's1', 'st-a')])).toEqual([
-      { role: 'operator', serverId: 's1', stackId: 'st-a' },
-    ])
+  it('PRESERVE: a server-wide viewer survives alongside a stack-scoped operator (#50)', () => {
+    // "viewer everywhere on s1 plus operator on st-a" cannot be shown as a single row, so the
+    // row becomes operator/[st-a] and the server-wide viewer is carried through as passthrough.
+    // A no-op save must therefore keep both grants — previously the viewer was silently dropped.
+    const result = roundTrip([binding('viewer', 's1'), binding('operator', 's1', 'st-a')])
+    expect(result).toHaveLength(2)
+    expect(result).toEqual(
+      expect.arrayContaining([
+        { role: 'operator', serverId: 's1', stackId: 'st-a' },
+        { role: 'viewer', serverId: 's1', stackId: '' },
+      ]),
+    )
+  })
+})
+
+describe('passthrough — preserve unrepresentable bindings (#50)', () => {
+  it('records the server-wide viewer that the operator row cannot show', () => {
+    const m = buildMatrix([binding('viewer', 's1'), binding('operator', 's1', 'st-a')], servers, stacks)
+    const s1 = m.rows.find(r => r.serverId === 's1')!
+    expect(s1.role).toBe('operator')
+    expect(s1.stackIds).toEqual(['st-a'])
+    expect(s1.passthrough).toEqual([{ role: 'viewer', serverId: 's1', stackId: '' }])
+  })
+
+  it('records nothing when the row already covers every binding', () => {
+    // operator server-wide covers the redundant stack-scoped operator — nothing to preserve.
+    const m = buildMatrix([binding('operator', 's1'), binding('operator', 's1', 'st-a')], servers, stacks)
+    const s1 = m.rows.find(r => r.serverId === 's1')!
+    expect(s1.passthrough).toEqual([])
+  })
+
+  it('preserves a stack-scoped viewer hidden under a different stack-scoped operator', () => {
+    const m = buildMatrix([binding('viewer', 's1', 'st-b'), binding('operator', 's1', 'st-a')], servers, stacks)
+    const s1 = m.rows.find(r => r.serverId === 's1')!
+    expect(s1.passthrough).toEqual([{ role: 'viewer', serverId: 's1', stackId: 'st-b' }])
+    expect(matrixToBindings(m)).toEqual(
+      expect.arrayContaining([
+        { role: 'operator', serverId: 's1', stackId: 'st-a' },
+        { role: 'viewer', serverId: 's1', stackId: 'st-b' },
+      ]),
+    )
+  })
+
+  it('drops a row\'s passthrough once the operator edits that row', () => {
+    // Simulates the dialog clearing passthrough on an explicit edit: setting the row to None
+    // must remove the previously hidden grant rather than resurrect it.
+    const m = buildMatrix([binding('viewer', 's1'), binding('operator', 's1', 'st-a')], servers, stacks)
+    const edited: MatrixState = {
+      ...m,
+      rows: m.rows.map(r =>
+        r.serverId === 's1' ? { ...r, role: '', stackIds: [], passthrough: [] } : r,
+      ),
+    }
+    expect(matrixToBindings(edited)).toEqual([])
   })
 })
