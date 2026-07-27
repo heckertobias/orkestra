@@ -29,13 +29,16 @@ func loadFromBytes(data []byte, projectName string, env map[string]string) (*com
 		environ = append(environ, k+"="+v)
 	}
 
+	// Interpolation is fed ONLY by the assignment's env values (WithEnv). The agent process's own
+	// environment is deliberately NOT an input (no cli.WithOsEnv): the Master holds the desired
+	// state, so a host variable must not silently change how a stack starts, and stack authors must
+	// not be able to read the agent process's environment via ${VAR} (#76). WithDotEnv /
+	// WithConfigFileEnv are also omitted — they are inert here (the temp dir has no .env, and
+	// ConfigPaths is always set), and they would reintroduce implicit inputs.
 	opts, err := cli.NewProjectOptions(
 		[]string{composeFile},
 		cli.WithName(projectName),
 		cli.WithEnv(environ),
-		cli.WithOsEnv,
-		cli.WithDotEnv,
-		cli.WithConfigFileEnv,
 	)
 	if err != nil {
 		return nil, err
