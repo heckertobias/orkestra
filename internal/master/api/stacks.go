@@ -155,21 +155,9 @@ func (h *StackServiceHandler) ExecOnContainer(ctx context.Context, req *connect.
 	if !masterauth.CanOperateOn(u, req.Msg.ServerId, "") {
 		return nil, errPermission("operator access required on this server")
 	}
-	sess := h.registry.Get(req.Msg.ServerId)
-	if sess == nil {
-		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("server not connected"))
-	}
-	// Forward ExecCommand to Agent via stream.
-	sess.Send(&orkestraV1.MasterMessage{
-		Payload: &orkestraV1.MasterMessage_ExecCommand{
-			ExecCommand: &orkestraV1.ExecCommand{
-				ContainerId: req.Msg.ContainerId,
-				Type:        commandTypeFromString(req.Msg.CommandType),
-				Args:        req.Msg.Args,
-			},
-		},
-	})
-	return connect.NewResponse(&orkestraV1.ExecOnContainerResponse{Success: true}), nil
+	// The agent does not dispatch container commands yet, so claiming success would be a lie.
+	// Report it honestly until command dispatch lands (#61) — same posture as StreamLogs/StreamStats.
+	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("container actions are not implemented yet (#61)"))
 }
 
 func (h *StackServiceHandler) StreamLogs(ctx context.Context, req *connect.Request[orkestraV1.StreamLogsRequest], stream *connect.ServerStream[orkestraV1.LogLine]) error {

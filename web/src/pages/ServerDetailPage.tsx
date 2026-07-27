@@ -62,14 +62,6 @@ export function ServerDetailPage() {
     load()
   }, [id])
 
-  async function execCommand(containerId: string, cmd: string) {
-    await fetch('/orkestra.v1.StackService/ExecOnContainer', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ serverId: id, containerId, commandType: cmd }),
-    })
-  }
-
   if (loading) {
     return <div style={{ color: 'var(--text-muted)' }}>Loading…</div>
   }
@@ -158,11 +150,11 @@ export function ServerDetailPage() {
                 <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>{c.restartCount}</td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1">
-                    <ActionBtn icon={<Play size={13} />} label="Start"   onClick={() => execCommand(c.id, 'start')} />
-                    <ActionBtn icon={<Square size={13} />} label="Stop"  onClick={() => execCommand(c.id, 'stop')} />
-                    <ActionBtn icon={<RotateCcw size={13} />} label="Restart" onClick={() => execCommand(c.id, 'restart')} />
+                    <ActionBtn icon={<Play size={13} />} label="Start"   disabled />
+                    <ActionBtn icon={<Square size={13} />} label="Stop"  disabled />
+                    <ActionBtn icon={<RotateCcw size={13} />} label="Restart" disabled />
                     <ActionBtn icon={<Terminal size={13} />} label="Logs" onClick={() => {}} />
-                    <ActionBtn icon={<Trash2 size={13} />} label="Remove" onClick={() => execCommand(c.id, 'remove')} danger />
+                    <ActionBtn icon={<Trash2 size={13} />} label="Remove" disabled danger />
                   </div>
                 </td>
               </tr>
@@ -174,17 +166,19 @@ export function ServerDetailPage() {
   )
 }
 
-function ActionBtn({ icon, label, onClick, danger }: {
+function ActionBtn({ icon, label, onClick, danger, disabled }: {
   icon: React.ReactNode
   label: string
-  onClick: () => void
+  onClick?: () => void
   danger?: boolean
+  disabled?: boolean
 }) {
   return (
     <button
-      title={label}
+      title={disabled ? `${label} — not available yet` : label}
       onClick={onClick}
-      className="p-1.5 rounded border transition-colors hover:bg-[var(--surface-2)]"
+      disabled={disabled}
+      className="p-1.5 rounded border transition-colors enabled:hover:bg-[var(--surface-2)] disabled:opacity-40 disabled:cursor-not-allowed"
       style={{
         borderColor: 'var(--border)',
         color: danger ? 'var(--error)' : 'var(--text-muted)',

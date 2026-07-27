@@ -121,7 +121,7 @@ Issues are grouped by milestone (**Beta** → **1.0** → **Post-1.0**) and labe
 
 | Topic | Issues |
 |---|---|
-| **Open bugs** | #70 fields silently dropped · #71 `restart: on-failure:N` · #75 `ExecOnContainer` false success · #77 unset metrics |
+| **Open bugs** | #70 fields silently dropped · #71 `restart: on-failure:N` · #77 unset metrics |
 | Compose field support | #10 networks · #11 named/tmpfs volumes · #12 `depends_on`/health · #13 wider fields · #14 scale · #15 build · #16 `network_mode` · #53 `configs` · #54 profiles · #55 resources/GPU · #56 `container_name` |
 | Converge internals | #17 registry auth · #18 spec-hash gaps · #57 support-table single source of truth · #58 JSON-schema validation · #65 master-side dry-run · #81 fail on unresolved `${VAR}` |
 | Live streams & commands | #19 logs · #20 stats · #21 exec/terminal · #61 command dispatch · #62 per-service actions · #66 extended container actions |
