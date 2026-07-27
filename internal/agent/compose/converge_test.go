@@ -6,6 +6,20 @@ import (
 	composetypes "github.com/compose-spec/compose-go/v2/types"
 )
 
+func TestSpecHashIncludesImageID(t *testing.T) {
+	svc := composetypes.ServiceConfig{Image: "app:latest"}
+
+	// A repointed tag (same string, new resolved ID) must change identity so the container is
+	// recreated — the core of #73.
+	if a, b := specHash(svc, "sha256:aaa"), specHash(svc, "sha256:bbb"); a == b {
+		t.Fatalf("spec-hash must change when the resolved image ID changes (got %q for both)", a)
+	}
+	// And it must stay stable for identical inputs, or every reconcile would recreate.
+	if a, b := specHash(svc, "sha256:aaa"), specHash(svc, "sha256:aaa"); a != b {
+		t.Fatalf("spec-hash must be stable for identical inputs: %q != %q", a, b)
+	}
+}
+
 func TestShouldPull(t *testing.T) {
 	tests := []struct {
 		name    string
