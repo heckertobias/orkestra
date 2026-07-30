@@ -133,6 +133,10 @@ func ValidateCompose(composeYAML string) []Diagnostic {
 			if strings.HasPrefix(fieldName, "x-") {
 				continue
 			}
+			if fieldName == "volumes" {
+				diags = append(diags, checkServiceVolumes(svcName, svcNode.Content[j+1])...)
+				continue
+			}
 			if _, unsup := unsupportedServiceFields[fieldName]; unsup {
 				diags = append(diags, Diagnostic{
 					Severity: SeverityWarning,
@@ -150,4 +154,79 @@ func ValidateCompose(composeYAML string) []Diagnostic {
 	}
 
 	return diags
+}
+
+// checkServiceVolumes flags every volume entry that is not a bind mount. orkestra applies bind
+// mounts only; a named or tmpfs volume that reaches the agent is silently dropped and, for a
+// database, destroys data on the next recreate (#70). Named/tmpfs support is tracked in #11. This
+// is a best-effort YAML-level check; the agent's converge engine is the authoritative backstop.
+func checkServiceVolumes(svcName string, node *yaml.Node) []Diagnostic {
+	if node == nil || node.Kind != yaml.SequenceNode {
+		return nil
+	}
+	var diags []Diagnostic
+	for _, item := range node.Content {
+		if ok, desc := isBindMount(item); !ok {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityError,
+				Message:  fmt.Sprintf("service %q: volume %q is not a bind mount — only bind mounts are supported (named/tmpfs volumes: #11)", svcName, desc),
+				Line:     item.Line,
+			})
+		}
+	}
+	return diags
+}
+
+// isBindMount reports whether a single compose volume entry (short-string or long-mapping syntax)
+// is a bind mount, and returns a short descriptor for the diagnostic. It mirrors compose-go's own
+// rule: a source that is a host path is a bind mount, a bare name is a named volume. Unknown shapes
+// are treated as bind mounts (no false positive) — the agent guard rejects anything it cannot apply.
+func isBindMount(item *yaml.Node) (bool, string) {
+	switch item.Kind {
+	case yaml.ScalarNode:
+		spec := item.Value
+		// Short syntax: [SOURCE:]TARGET[:MODE]. No colon means a single TARGET — an anonymous volume.
+		src, _, hasSource := strings.Cut(spec, ":")
+		if !hasSource {
+			return false, spec
+		}
+		return isHostPath(src), spec
+	case yaml.MappingNode:
+		var typ, source, target string
+		for i := 0; i+1 < len(item.Content); i += 2 {
+			switch item.Content[i].Value {
+			case "type":
+				typ = item.Content[i+1].Value
+			case "source":
+				source = item.Content[i+1].Value
+			case "target":
+				target = item.Content[i+1].Value
+			}
+		}
+		desc := target
+		if desc == "" {
+			desc = source
+		}
+		if typ != "" {
+			return typ == "bind", desc
+		}
+		return isHostPath(source), desc
+	}
+	return true, ""
+}
+
+// isHostPath reports whether a compose volume source refers to a host path (bind mount) rather than
+// a named volume. Bind sources are absolute, relative, or home-anchored paths.
+func isHostPath(s string) bool {
+	switch {
+	case s == "." || s == ".." || s == "~":
+		return true
+	case strings.HasPrefix(s, "/"),
+		strings.HasPrefix(s, "./"),
+		strings.HasPrefix(s, "../"),
+		strings.HasPrefix(s, "~/"):
+		return true
+	default:
+		return false
+	}
 }

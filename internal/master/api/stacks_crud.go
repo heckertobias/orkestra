@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -11,8 +12,35 @@ import (
 
 	masterauth "github.com/heckertobias/orkestra/internal/master/auth"
 	"github.com/heckertobias/orkestra/internal/master/store"
+	sharedcompose "github.com/heckertobias/orkestra/internal/shared/compose"
 	orkestraV1 "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1"
 )
+
+// validateComposeOrError returns an InvalidArgument error listing every error-severity diagnostic
+// from ValidateCompose, or nil when the compose has no blocking problems (warnings do not block).
+// This is what makes the editor's diagnostics actually enforced: an unsupported construct such as a
+// named volume (#70) is refused at create/update instead of being stored and silently dropped by the
+// agent. An empty compose is treated as valid — a stack may be created without an initial version.
+func validateComposeOrError(composeYAML string) error {
+	if composeYAML == "" {
+		return nil
+	}
+	var msgs []string
+	for _, d := range sharedcompose.ValidateCompose(composeYAML) {
+		if d.Severity != sharedcompose.SeverityError {
+			continue
+		}
+		if d.Line > 0 {
+			msgs = append(msgs, fmt.Sprintf("line %d: %s", d.Line, d.Message))
+		} else {
+			msgs = append(msgs, d.Message)
+		}
+	}
+	if len(msgs) == 0 {
+		return nil
+	}
+	return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("compose validation failed: %s", strings.Join(msgs, "; ")))
+}
 
 // CreateStack creates a new stack with an initial version.
 // Any operator (any scope) may create a stack definition.
@@ -24,6 +52,9 @@ func (h *StackServiceHandler) CreateStack(ctx context.Context, req *connect.Requ
 	r := req.Msg
 	if r.Name == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("name is required"))
+	}
+	if err := validateComposeOrError(r.ComposeYaml); err != nil {
+		return nil, err
 	}
 
 	stackID := uuid.NewString()
@@ -69,6 +100,9 @@ func (h *StackServiceHandler) UpdateStack(ctx context.Context, req *connect.Requ
 		return nil, errPermission("operator access required on an assigned server to update this stack")
 	}
 	r := req.Msg
+	if err := validateComposeOrError(r.ComposeYaml); err != nil {
+		return nil, err
+	}
 	nextVer, err := h.q.GetNextVersionNumber(ctx, r.Id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("stack not found"))

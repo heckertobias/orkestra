@@ -127,9 +127,11 @@ user labels; extending it goes hand in hand with widening field support.
 
 - **Networks:** containers run on the daemon's default bridge. User-defined `networks` (and thus
   Compose service-name DNS between services of a stack) are not supported yet.
-- **Volumes:** **bind mounts** are applied (`source:target[:ro]`, host paths). Named volumes and
-  tmpfs mounts are not supported yet. Anonymous volumes are per-container and are recreated with
-  the container.
+- **Volumes:** **bind mounts** are applied (`source:target[:ro]`, host paths). Every other mount
+  type — named volumes, tmpfs, and anonymous volumes — is **rejected** with a clear error, at the
+  editor/API and again in the agent, rather than being silently dropped: a dropped named volume
+  would send a database's writes into the container layer and destroy them on the next recreate.
+  Named and tmpfs volume support is tracked separately.
 - **Removal:** on `REMOVED`, managed containers are stopped and removed. orkestra does not create
   or delete networks and volumes on its own, so no data is destroyed behind the operator's back.
 
