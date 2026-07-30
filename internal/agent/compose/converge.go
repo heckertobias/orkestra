@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net/netip"
 	"sort"
+	"strconv"
+	"strings"
 
 	composetypes "github.com/compose-spec/compose-go/v2/types"
 	cerrdefs "github.com/containerd/errdefs"
@@ -220,9 +222,13 @@ func createAndStart(ctx context.Context, dc *client.Client, stackID, projectName
 		WorkingDir:   svc.WorkingDir,
 		User:         svc.User,
 	}
+	restartPolicy, err := toRestartPolicy(svc.Restart)
+	if err != nil {
+		return err
+	}
 	hostCfg := &container.HostConfig{
 		PortBindings:  portBindings,
-		RestartPolicy: toRestartPolicy(svc.Restart),
+		RestartPolicy: restartPolicy,
 		Binds:         buildBinds(svc.Volumes),
 		Privileged:    svc.Privileged,
 		CapAdd:        svc.CapAdd,
@@ -261,7 +267,11 @@ func ensureImage(ctx context.Context, dc *client.Client, ref, pullPolicy string)
 		}
 	}
 
-	if !shouldPull(pullPolicy, present) {
+	pull, err := shouldPull(pullPolicy, present)
+	if err != nil {
+		return err
+	}
+	if !pull {
 		return nil
 	}
 
@@ -296,15 +306,19 @@ func imageID(ctx context.Context, dc *client.Client, ref string) string {
 // shouldPull decides whether to pull an image given the Compose pull_policy and whether the
 // image is already present locally. An empty policy defaults to "missing" (Compose default).
 // "never" and "build" never pull — for "never" a missing image lets ContainerCreate fail loudly,
-// and "build" images are not fetched from a registry.
-func shouldPull(policy string, present bool) bool {
+// and "build" images are not fetched from a registry. An unknown value is a loud error, never a
+// silent default: the time-based policies (refresh/daily/weekly/every_*) used to fall through and
+// behave like "missing", the opposite of what they request.
+func shouldPull(policy string, present bool) (bool, error) {
 	switch policy {
 	case composetypes.PullPolicyAlways:
-		return true
+		return true, nil
 	case composetypes.PullPolicyNever, composetypes.PullPolicyBuild:
-		return false
-	default: // "missing", "if_not_present", or unset
-		return !present
+		return false, nil
+	case "", composetypes.PullPolicyMissing, composetypes.PullPolicyIfNotPresent:
+		return !present, nil
+	default:
+		return false, fmt.Errorf("unsupported pull_policy %q (time-based policies are not yet supported)", policy)
 	}
 }
 
@@ -370,16 +384,28 @@ func buildPorts(ports []composetypes.ServicePortConfig) (network.PortMap, networ
 	return portMap, portSet, nil
 }
 
-func toRestartPolicy(policy string) container.RestartPolicy {
-	switch policy {
-	case "always":
-		return container.RestartPolicy{Name: "always"}
-	case "unless-stopped":
-		return container.RestartPolicy{Name: "unless-stopped"}
-	case "on-failure":
-		return container.RestartPolicy{Name: "on-failure"}
+// toRestartPolicy maps a Compose `restart:` string onto a Docker restart policy. An unknown value
+// is a loud error, never a silent default: previously `on-failure:5` (and any typo) fell through to
+// "no", so the container never restarted despite asking it to.
+func toRestartPolicy(policy string) (container.RestartPolicy, error) {
+	switch {
+	case policy == "", policy == "no":
+		return container.RestartPolicy{Name: container.RestartPolicyDisabled}, nil
+	case policy == "always":
+		return container.RestartPolicy{Name: container.RestartPolicyAlways}, nil
+	case policy == "unless-stopped":
+		return container.RestartPolicy{Name: container.RestartPolicyUnlessStopped}, nil
+	case policy == "on-failure":
+		return container.RestartPolicy{Name: container.RestartPolicyOnFailure}, nil
+	case strings.HasPrefix(policy, "on-failure:"):
+		// Docker only accepts a maximum retry count together with the on-failure policy.
+		n, err := strconv.Atoi(strings.TrimPrefix(policy, "on-failure:"))
+		if err != nil || n < 0 {
+			return container.RestartPolicy{}, fmt.Errorf("invalid restart policy %q: on-failure count must be a non-negative integer", policy)
+		}
+		return container.RestartPolicy{Name: container.RestartPolicyOnFailure, MaximumRetryCount: n}, nil
 	default:
-		return container.RestartPolicy{Name: "no"}
+		return container.RestartPolicy{}, fmt.Errorf("unsupported restart policy %q", policy)
 	}
 }
 

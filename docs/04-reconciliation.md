@@ -147,7 +147,7 @@ set are rejected with a clear message instead of being quietly dropped.
 | Field | Notes |
 |---|---|
 | `image` | Resolved and pulled per `pull_policy` before the container spec is built |
-| `pull_policy` | `always` / `never` / `build` / `missing` (default) |
+| `pull_policy` | `always` / `never` / `build` / `missing` (default) / `if_not_present`. The time-based policies (`refresh`, `daily`, `weekly`, `every_*`) are rejected — they need pull-history state that does not exist yet |
 | `command` | |
 | `entrypoint` | |
 | `environment` | List and map form |

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	composetypes "github.com/compose-spec/compose-go/v2/types"
+	"github.com/moby/moby/api/types/container"
 )
 
 func TestSpecHashIncludesImageID(t *testing.T) {
@@ -26,23 +27,70 @@ func TestShouldPull(t *testing.T) {
 		policy  string
 		present bool
 		want    bool
+		wantErr bool
 	}{
-		{"default pulls when missing", "", false, true},
-		{"default skips when present", "", true, false},
-		{"missing pulls when missing", composetypes.PullPolicyMissing, false, true},
-		{"missing skips when present", composetypes.PullPolicyMissing, true, false},
-		{"if_not_present pulls when missing", composetypes.PullPolicyIfNotPresent, false, true},
-		{"if_not_present skips when present", composetypes.PullPolicyIfNotPresent, true, false},
-		{"always pulls when present", composetypes.PullPolicyAlways, true, true},
-		{"always pulls when missing", composetypes.PullPolicyAlways, false, true},
-		{"never skips when missing", composetypes.PullPolicyNever, false, false},
-		{"never skips when present", composetypes.PullPolicyNever, true, false},
-		{"build skips when missing", composetypes.PullPolicyBuild, false, false},
+		{"default pulls when missing", "", false, true, false},
+		{"default skips when present", "", true, false, false},
+		{"missing pulls when missing", composetypes.PullPolicyMissing, false, true, false},
+		{"missing skips when present", composetypes.PullPolicyMissing, true, false, false},
+		{"if_not_present pulls when missing", composetypes.PullPolicyIfNotPresent, false, true, false},
+		{"if_not_present skips when present", composetypes.PullPolicyIfNotPresent, true, false, false},
+		{"always pulls when present", composetypes.PullPolicyAlways, true, true, false},
+		{"always pulls when missing", composetypes.PullPolicyAlways, false, true, false},
+		{"never skips when missing", composetypes.PullPolicyNever, false, false, false},
+		{"never skips when present", composetypes.PullPolicyNever, true, false, false},
+		{"build skips when missing", composetypes.PullPolicyBuild, false, false, false},
+		{"refresh is rejected", "refresh", false, false, true},
+		{"daily is rejected", "daily", false, false, true},
+		{"weekly is rejected", "weekly", true, false, true},
+		{"every_* is rejected", "every_5m", false, false, true},
+		{"unknown value is rejected", "sometimes", false, false, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := shouldPull(tc.policy, tc.present); got != tc.want {
+			got, err := shouldPull(tc.policy, tc.present)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("shouldPull(%q, %v) error = %v, wantErr %v", tc.policy, tc.present, err, tc.wantErr)
+			}
+			if err == nil && got != tc.want {
 				t.Errorf("shouldPull(%q, %v) = %v, want %v", tc.policy, tc.present, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestToRestartPolicy(t *testing.T) {
+	tests := []struct {
+		name     string
+		policy   string
+		wantName container.RestartPolicyMode
+		wantMax  int
+		wantErr  bool
+	}{
+		{"empty means no", "", container.RestartPolicyDisabled, 0, false},
+		{"explicit no", "no", container.RestartPolicyDisabled, 0, false},
+		{"always", "always", container.RestartPolicyAlways, 0, false},
+		{"unless-stopped", "unless-stopped", container.RestartPolicyUnlessStopped, 0, false},
+		{"on-failure without count", "on-failure", container.RestartPolicyOnFailure, 0, false},
+		{"on-failure with count", "on-failure:5", container.RestartPolicyOnFailure, 5, false},
+		{"on-failure zero count", "on-failure:0", container.RestartPolicyOnFailure, 0, false},
+		{"on-failure non-integer is rejected", "on-failure:abc", "", 0, true},
+		{"on-failure negative is rejected", "on-failure:-1", "", 0, true},
+		{"typo is rejected", "alwasy", "", 0, true},
+		{"unknown value is rejected", "restart-always", "", 0, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := toRestartPolicy(tc.policy)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("toRestartPolicy(%q) error = %v, wantErr %v", tc.policy, err, tc.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if got.Name != tc.wantName || got.MaximumRetryCount != tc.wantMax {
+				t.Errorf("toRestartPolicy(%q) = {Name:%q, Max:%d}, want {Name:%q, Max:%d}",
+					tc.policy, got.Name, got.MaximumRetryCount, tc.wantName, tc.wantMax)
 			}
 		})
 	}
