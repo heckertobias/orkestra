@@ -52,20 +52,37 @@ var validServiceFields = map[string]struct{}{
 	"working_dir": {},
 }
 
-// unsupportedServiceFields is the subset of validServiceFields that orkestra
-// recognises as valid Compose syntax but does not act on.
-var unsupportedServiceFields = map[string]struct{}{
-	"deploy":         {},
-	"profiles":       {},
-	"links":          {},
-	"external_links": {},
-	"scale":          {},
+// errorServiceFields are valid Compose fields whose presence makes the stack do the wrong thing if
+// it is applied anyway, so they are a hard error. `volumes` and `extends` need value-level checks
+// and are handled separately.
+var errorServiceFields = map[string]string{
+	"profiles": `"profiles" is not supported — a profiled service is loaded and then removed as an orphan (#54)`,
+	"configs":  `"configs" is not supported — the config is never delivered to the container (#53)`,
 }
 
-// unsupportedTopLevelKeys are top-level compose keys that orkestra ignores.
-var unsupportedTopLevelKeys = map[string]struct{}{
-	"configs":    {},
-	"extensions": {},
+// warnServiceFields are valid Compose fields orkestra silently ignores. The stack still runs, so a
+// warning is enough — but the operator must know the field has no effect.
+var warnServiceFields = map[string]string{
+	"deploy":         `"deploy" is not supported and is ignored`,
+	"links":          `"links" is not supported and is ignored`,
+	"external_links": `"external_links" is not supported and is ignored`,
+	"scale":          `"scale" is not supported and is ignored (#14)`,
+	"secrets":        `compose "secrets" are not delivered — use orkestra Secrets instead (#22)`,
+	"container_name": `"container_name" is ignored — orkestra names containers <project>-<service>-<id> (#56)`,
+	"healthcheck":    `"healthcheck" is not applied — depends_on: condition: service_healthy will never be satisfied (#12)`,
+	"logging":        `"logging" is not applied — the default json-file driver runs without a size limit (#13)`,
+}
+
+// errorTopLevelKeys are top-level compose keys that break reconciliation if present.
+var errorTopLevelKeys = map[string]string{
+	"include": `top-level "include" is not supported — the agent loads a single compose file, so the include fails at load time and the whole stack stops reconciling (#64)`,
+}
+
+// warnTopLevelKeys are top-level compose keys orkestra ignores.
+var warnTopLevelKeys = map[string]string{
+	"configs":    `top-level "configs" is not supported and is ignored (#53)`,
+	"secrets":    `top-level "secrets" are not delivered — use orkestra Secrets instead (#22)`,
+	"extensions": `top-level "extensions" is not supported and is ignored`,
 }
 
 // ValidateCompose parses the given YAML and returns diagnostics for YAML errors,
@@ -108,12 +125,12 @@ func ValidateCompose(composeYAML string) []Diagnostic {
 			})
 			continue
 		}
-		if _, unsup := unsupportedTopLevelKeys[key.Value]; unsup {
-			diags = append(diags, Diagnostic{
-				Severity: SeverityWarning,
-				Message:  fmt.Sprintf("top-level key %q is not supported and will be ignored", key.Value),
-				Line:     key.Line,
-			})
+		if msg, ok := errorTopLevelKeys[key.Value]; ok {
+			diags = append(diags, Diagnostic{Severity: SeverityError, Message: msg, Line: key.Line})
+			continue
+		}
+		if msg, ok := warnTopLevelKeys[key.Value]; ok {
+			diags = append(diags, Diagnostic{Severity: SeverityWarning, Message: msg, Line: key.Line})
 		}
 	}
 
@@ -137,10 +154,20 @@ func ValidateCompose(composeYAML string) []Diagnostic {
 				diags = append(diags, checkServiceVolumes(svcName, svcNode.Content[j+1])...)
 				continue
 			}
-			if _, unsup := unsupportedServiceFields[fieldName]; unsup {
+			if fieldName == "extends" {
+				diags = append(diags, checkServiceExtends(svcName, svcNode.Content[j+1])...)
+				continue
+			}
+			if msg, ok := errorServiceFields[fieldName]; ok {
+				diags = append(diags, Diagnostic{
+					Severity: SeverityError,
+					Message:  fmt.Sprintf("service %q: %s", svcName, msg),
+					Line:     fieldKey.Line,
+				})
+			} else if msg, ok := warnServiceFields[fieldName]; ok {
 				diags = append(diags, Diagnostic{
 					Severity: SeverityWarning,
-					Message:  fmt.Sprintf("service %q: field %q is not supported and will be ignored", svcName, fieldName),
+					Message:  fmt.Sprintf("service %q: %s", svcName, msg),
 					Line:     fieldKey.Line,
 				})
 			} else if _, valid := validServiceFields[fieldName]; !valid {
@@ -175,6 +202,26 @@ func checkServiceVolumes(svcName string, node *yaml.Node) []Diagnostic {
 		}
 	}
 	return diags
+}
+
+// checkServiceExtends allows in-file extends (compose-go resolves `extends: name` and
+// `extends: {service: ...}` within the same file) but rejects `extends: {file: ...}`: the agent
+// loads a single compose file with no sibling files, so a file-based extends fails at load time and
+// the whole stack stops reconciling (#64).
+func checkServiceExtends(svcName string, node *yaml.Node) []Diagnostic {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil // scalar short form `extends: name` refers to a service in the same file — supported
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == "file" {
+			return []Diagnostic{{
+				Severity: SeverityError,
+				Message:  fmt.Sprintf("service %q: \"extends.file\" is not supported — only in-file extends works (#64)", svcName),
+				Line:     node.Content[i].Line,
+			}}
+		}
+	}
+	return nil
 }
 
 // isBindMount reports whether a single compose volume entry (short-string or long-mapping syntax)
