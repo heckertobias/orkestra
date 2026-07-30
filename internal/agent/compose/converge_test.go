@@ -20,6 +20,49 @@ func TestSpecHashIncludesImageID(t *testing.T) {
 	}
 }
 
+func TestBuildBinds(t *testing.T) {
+	t.Run("bind mounts pass through", func(t *testing.T) {
+		vols := []composetypes.ServiceVolumeConfig{
+			{Type: "bind", Source: "/host/data", Target: "/data"},
+			{Type: "bind", Source: "/host/ro", Target: "/ro", ReadOnly: true},
+		}
+		got, err := buildBinds(vols)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := []string{"/host/data:/data", "/host/ro:/ro:ro"}
+		if len(got) != len(want) {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("bind[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+	t.Run("named volume is rejected", func(t *testing.T) {
+		vols := []composetypes.ServiceVolumeConfig{{Type: "volume", Source: "dbdata", Target: "/data"}}
+		if _, err := buildBinds(vols); err == nil {
+			t.Fatal("expected an error for a named volume, got nil")
+		}
+	})
+	t.Run("tmpfs is rejected", func(t *testing.T) {
+		vols := []composetypes.ServiceVolumeConfig{{Type: "tmpfs", Target: "/cache"}}
+		if _, err := buildBinds(vols); err == nil {
+			t.Fatal("expected an error for a tmpfs mount, got nil")
+		}
+	})
+	t.Run("no volumes is fine", func(t *testing.T) {
+		got, err := buildBinds(nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("expected no binds, got %v", got)
+		}
+	})
+}
+
 func TestShouldPull(t *testing.T) {
 	tests := []struct {
 		name    string

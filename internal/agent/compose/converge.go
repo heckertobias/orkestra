@@ -220,10 +220,14 @@ func createAndStart(ctx context.Context, dc *client.Client, stackID, projectName
 		WorkingDir:   svc.WorkingDir,
 		User:         svc.User,
 	}
+	binds, err := buildBinds(svc.Volumes)
+	if err != nil {
+		return err
+	}
 	hostCfg := &container.HostConfig{
 		PortBindings:  portBindings,
 		RestartPolicy: toRestartPolicy(svc.Restart),
-		Binds:         buildBinds(svc.Volumes),
+		Binds:         binds,
 		Privileged:    svc.Privileged,
 		CapAdd:        svc.CapAdd,
 		CapDrop:       svc.CapDrop,
@@ -383,16 +387,35 @@ func toRestartPolicy(policy string) container.RestartPolicy {
 	}
 }
 
-func buildBinds(vols []composetypes.ServiceVolumeConfig) []string {
-	var binds []string
+// buildBinds converts a service's volumes into Docker bind-mount strings. Only bind mounts are
+// supported today; any other mount type is a loud error, never a silent drop. Silently dropping a
+// named volume is the #70 data-loss bug: the service then writes into the container's writable layer
+// and loses everything on the next recreate. Named and tmpfs volume support is tracked in #11.
+func buildBinds(vols []composetypes.ServiceVolumeConfig) ([]string, error) {
+	binds := make([]string, 0, len(vols))
 	for _, v := range vols {
-		if v.Type == "bind" && v.Source != "" {
-			bind := v.Source + ":" + v.Target
-			if v.ReadOnly {
-				bind += ":ro"
+		if v.Type != composetypes.VolumeTypeBind {
+			target := v.Target
+			if target == "" {
+				target = v.Source
 			}
-			binds = append(binds, bind)
+			kind := v.Type
+			switch {
+			case kind == composetypes.VolumeTypeVolume && v.Source != "":
+				kind = "named volume"
+			case kind == "":
+				kind = "non-bind"
+			}
+			return nil, fmt.Errorf("volume %q is not supported: only bind mounts work today, got a %s mount (named/tmpfs volumes: #11)", target, kind)
 		}
+		if v.Source == "" {
+			return nil, fmt.Errorf("bind mount %q has no host source path", v.Target)
+		}
+		bind := v.Source + ":" + v.Target
+		if v.ReadOnly {
+			bind += ":ro"
+		}
+		binds = append(binds, bind)
 	}
-	return binds
+	return binds, nil
 }
