@@ -141,8 +141,10 @@ user labels; extending it goes hand in hand with widening field support.
 
 Validation and execution share one definition. `internal/shared/compose` is used both by the
 Master's `ValidateCompose` RPC (the diagnostics shown in the stack editor) and by the Agent, so a
-stack that validates cleanly is a stack the Agent can actually run. Fields outside the supported
-set are rejected with a clear message instead of being quietly dropped.
+stack that validates cleanly is a stack the Agent can actually run. Nothing outside the supported
+set is ever quietly dropped: an unsupported construct is either an **error** (the create/update is
+refused) when applying it anyway would do the wrong thing, or a **warning** (accepted, but the
+operator is told the field has no effect).
 
 ### `services.<name>` — supported
 
@@ -162,21 +164,33 @@ set are rejected with a clear message instead of being quietly dropped.
 | `privileged` | |
 | `cap_add` / `cap_drop` | |
 | `volumes` | Bind mounts only: `source:target[:ro]` with a host path |
+| `extends` | In-file only (`extends: name` or `extends: {service: ...}`); resolved by compose-go |
 
 Top level: `services` and `x-*` extension keys. A top-level `name` is ignored — the stack name is
 owned by orkestra.
 
-### `services.<name>` — not supported
+### `services.<name>` — rejected (error)
 
-Everything else, including: `networks`, named and tmpfs `volumes`, `depends_on`, `healthcheck`,
-`expose`, `hostname`, `extra_hosts`, `dns`, `read_only`, `security_opt`, `sysctls`, `ulimits`,
-`mem_limit` / `mem_reservation`, `cpus` / `cpu_shares`, `deploy`, `logging`, `stop_grace_period`,
-`init`, `tty` / `stdin_open`, `devices`, `build`, `network_mode`, `container_name`, `profiles`,
-`scale`, `links` / `external_links`. Top level: `configs`, `extensions`.
+Applying these anyway would do the wrong thing, so they are refused at create/update:
+
+- named / tmpfs / anonymous `volumes` (only bind mounts are applied)
+- `profiles` — a profiled service would be loaded and then removed as an orphan
+- `configs` — the config is never delivered to the container
+- `extends: {file: ...}` — the agent loads a single file, so a file extends fails at load time and
+  stops the whole stack from reconciling
+- top level: `include` (same load-time failure as `extends: file:`)
+
+### `services.<name>` — ignored (warning)
+
+Accepted so the stack still runs, but the field has no effect and the editor says so:
+`container_name`, `healthcheck`, `logging`, `secrets`, `deploy`, `scale`, `links` /
+`external_links`. Top level: `configs`, `secrets`, `extensions`.
 
 Compose-native `secrets` and `configs` are deliberately not used — orkestra Secrets are the
-supported mechanism (see [05-secrets.md](05-secrets.md)). A field that is not part of the Compose
-spec at all is a syntax error, reported with its line number.
+supported mechanism (see [05-secrets.md](05-secrets.md)). Everything else in the Compose spec that
+orkestra does not apply (`networks`, `depends_on`, `expose`, `dns`, resource limits, `build`,
+`network_mode`, …) is not supported yet. A field that is not part of the Compose spec at all is a
+syntax error, reported with its line number.
 
 ---
 
