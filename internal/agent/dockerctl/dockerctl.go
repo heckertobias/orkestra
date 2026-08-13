@@ -32,19 +32,21 @@ func (c *Client) Close() error { return c.dc.Close() }
 // RawClient returns the underlying *client.Client for use by packages that need it directly.
 func (c *Client) RawClient() *client.Client { return c.dc }
 
-// ContainerInfo is a summary of a single container.
+// ContainerInfo is a summary of a single container, as returned by a container list. Fields
+// that only a container inspect carries (restart count, start time) are deliberately absent —
+// see internal/agent/status for the inventory that enriches them.
 type ContainerInfo struct {
-	ID           string
-	Names        []string
-	Image        string
-	ImageID      string
-	State        string // running | exited | paused | ...
-	Status       string // "Up 3 hours"
-	RestartCount int
-	Labels       map[string]string
+	ID      string
+	Names   []string
+	Image   string
+	ImageID string
+	State   string // running | exited | paused | ...
+	Status  string // "Up 3 hours"
+	Labels  map[string]string
 }
 
-// ListContainers returns all managed containers (all states).
+// ListContainers returns every container on the host in any state, orkestra-managed or not.
+// The orkestra-managed inventory reported to the Master comes from compose.ListManagedContainers.
 func (c *Client) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
 	res, err := c.dc.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {

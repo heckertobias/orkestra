@@ -144,14 +144,16 @@ create a new version.
 -- Last known actual state per server (JSONB blob, replaced on each StatusReport)
 CREATE TABLE agent_state (
   server_id    TEXT    PRIMARY KEY REFERENCES servers(id),
-  state_json   JSONB   NOT NULL,  -- {stacks: [StackStatus], reported_at: ms}
+  state_json   JSONB   NOT NULL,  -- protojson of the last StatusReport
   updated_at   BIGINT  NOT NULL
 );
 ```
 
-The table is part of the schema; populating it from `StatusReport` (and deriving the
-container→stack mapping the UI needs) is not implemented yet, so container inventory in the UI is
-still empty.
+One row per server, replaced on every `StatusReport` — the report is a full snapshot of the host,
+so merging would keep stacks alive that are gone. `state_json` is the protojson encoding of the
+`StatusReport` message itself, which keeps the blob's schema tied to the proto rather than to a
+second hand-written shape. It backs the container inventory on the server page and the
+container→stack resolution `ExecOnContainer` authorises against.
 
 ### Updates
 

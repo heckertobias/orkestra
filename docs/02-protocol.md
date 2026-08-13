@@ -57,9 +57,10 @@ sequenceDiagram
     Agent->>Master: AgentMessage{Hello}<br/>{agent_id, version, docker_version, os, arch, ...}
     Note over Master: register session: agentID → stream handle<br/>mark server online
     Master-->>Agent: MasterMessage{ApplyDesiredState} (current desired state)
+    Agent->>Master: AgentMessage{StatusReport} (first inventory, immediately)
     Note over Agent,Master: stream stays open indefinitely
     loop every 30 s
-        Agent->>Master: AgentMessage{StatusReport} (heartbeat)
+        Agent->>Master: AgentMessage{StatusReport} (heartbeat + container inventory)
         Master-->>Agent: MasterMessage{Ping} / {MetricsRequest} as needed
         Agent->>Master: AgentMessage{Pong} / {MetricsResponse}
     end
@@ -219,11 +220,17 @@ message AvailableUpdate {
 
 message StackStatus {
   string                   stack_id          = 1;
-  string                   running_version   = 2;
+  string                   running_version   = 2;  // stack_version_id; empty while a rollout is mixed
   repeated ContainerStatus containers        = 3;
   bool                     drift_detected    = 4;
   string                   drift_description = 5;
-  string                   error             = 6;
+  string                   error             = 6;  // summary of the last reconcile failure
+  repeated ServiceError    service_errors    = 7;  // per-service detail behind that summary
+}
+
+message ServiceError {  // defined in common.proto, shared with the UI API
+  string service_name = 1;
+  string error        = 2;
 }
 
 message ContainerStatus {
@@ -233,6 +240,9 @@ message ContainerStatus {
   string status        = 4;  // "Up 3 hours"
   int32  restart_count = 5;
   int64  started_at_ms = 6;
+  string health        = 7;  // "" (no healthcheck) | starting | healthy | unhealthy
+  string name          = 8;  // container name, no leading slash
+  string image         = 9;  // image reference as configured
 }
 
 message LogChunk   { string stream_id = 1; bytes data = 2; }
@@ -271,6 +281,7 @@ service StackService {
   // Servers
   rpc ListServers(ListServersRequest)     returns (ListServersResponse);
   rpc GetServer(GetServerRequest)         returns (Server);
+  rpc GetServerState(GetServerStateRequest) returns (ServerState); // last reported inventory
   rpc UpdateServer(UpdateServerRequest)   returns (Server);   // rename, labels
   rpc DeleteServer(DeleteServerRequest)   returns (Empty);    // soft delete
 

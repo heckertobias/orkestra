@@ -102,7 +102,14 @@ Every orkestra-managed container carries these labels:
 | `orkestra.stack-id` | `<stack_id>` |
 | `orkestra.service` | `<compose_service_name>` |
 | `orkestra.spec-hash` | SHA-256 (truncated) of the normalised service spec |
+| `orkestra.stack-version` | `<stack_version_id>` the container was created from |
 | `com.docker.compose.project` / `com.docker.compose.service` | for `docker compose ls` / tooling compatibility |
+
+`orkestra.stack-version` is not part of the identity: it records which version *created* the
+container so the Agent can report what is actually running rather than what was last pushed. It
+does not enter the `spec-hash`, so a new version whose service specs are byte-identical does not
+recreate anything — and the label then still names the older version, which is the truthful answer
+about the container in front of it.
 
 The **`spec-hash`** decides whether a container has to be recreated. It is a SHA-256 (first 8
 bytes) over the identity-relevant part of the service spec:
@@ -201,10 +208,20 @@ stopped, disappeared, or whose `spec-hash` no longer matches the desired spec is
 container that someone killed or edited by hand is brought back on the next pass, at most 30
 seconds later.
 
-The `StatusReport` / `StackStatus` wire format carries the per-stack running version, per-container
-state, and `drift_detected` / `drift_description`. Surfacing that in the UI (drift badges,
-human-readable descriptions, container inventory) depends on persisting agent state, which is not
-wired yet.
+### Reported State
+
+Every 30 seconds — and once immediately after `Hello`, so a fresh connection does not leave the UI
+blank for half a minute — the Agent reports what is on the host:
+
+- it lists the containers labelled `orkestra.managed=true` and groups them by `orkestra.stack-id`,
+- it inspects each one for the restart count and start time, which a container list does not carry,
+- it fills `running_version` from `orkestra.stack-version` when every container of the stack agrees
+  on one — a half-finished rollout has no single running version and reports none,
+- and it attaches the outcome of the last reconcile: `error` per stack plus `service_errors` per
+  service, so a stack that failed before any container existed still reports why.
+
+The Master stores the report verbatim in `agent_state` and serves it to the UI. `drift_detected` /
+`drift_description` are part of the same message but are not populated yet.
 
 ---
 

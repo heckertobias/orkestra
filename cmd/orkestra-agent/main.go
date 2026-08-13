@@ -18,6 +18,7 @@ import (
 	"github.com/heckertobias/orkestra/internal/agent/enroll"
 	_ "github.com/heckertobias/orkestra/internal/agent/metrics" // register metrics
 	agentreconcile "github.com/heckertobias/orkestra/internal/agent/reconcile"
+	"github.com/heckertobias/orkestra/internal/agent/status"
 	orkestraV1 "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1"
 	"github.com/heckertobias/orkestra/internal/shared/version"
 )
@@ -98,9 +99,11 @@ func runServe(args []string) {
 		slog.Warn("docker client unavailable (is Docker running?)", "err", err)
 		dc = nil
 	}
-	_ = dc // used via reconciler below
+	raw := dcForReconcile(dc)
 
-	rec := agentreconcile.New(dcForReconcile(dc))
+	// The status store collects reconcile outcomes and builds the inventory the agent reports.
+	st := status.NewStore()
+	rec := agentreconcile.New(raw, st)
 
 	go rec.Run(ctx)
 
@@ -118,6 +121,8 @@ func runServe(args []string) {
 			slog.Debug("unhandled master message")
 		}
 		return nil
+	}, func(ctx context.Context) *orkestraV1.StatusReport {
+		return st.Report(ctx, raw)
 	})
 
 	// Start metrics server.

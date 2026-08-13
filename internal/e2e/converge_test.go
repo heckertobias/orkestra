@@ -58,7 +58,7 @@ func TestConvergeDeploysContainer(t *testing.T) {
 		}
 	}()
 
-	if err := compose.Converge(ctx, raw, stackID, proj); err != nil {
+	if err := compose.Converge(ctx, raw, stackID, "v1", proj); err != nil {
 		t.Fatalf("Converge: %v", err)
 	}
 
@@ -79,6 +79,32 @@ func TestConvergeDeploysContainer(t *testing.T) {
 		if c.State != "running" {
 			t.Fatalf("container %s state = %q, want running", c.ID[:12], c.State)
 		}
+		// The version label is what lets the agent report which version actually runs (#29).
+		if got := c.Labels[compose.LabelStackVersion]; got != "v1" {
+			t.Fatalf("container %s %s = %q, want v1", c.ID[:12], compose.LabelStackVersion, got)
+		}
+	}
+
+	// The same containers must show up in the inventory the agent reports.
+	managed, err := compose.ListManagedContainers(ctx, raw)
+	if err != nil {
+		t.Fatalf("ListManagedContainers: %v", err)
+	}
+	found := false
+	for _, m := range managed {
+		if m.StackID != stackID {
+			continue
+		}
+		found = true
+		if m.Service != "sleeper" || m.StackVersion != "v1" || m.State != "running" {
+			t.Fatalf("unexpected inventory entry: %+v", m)
+		}
+		if m.Name == "" || m.Image == "" {
+			t.Fatalf("inventory entry missing name/image: %+v", m)
+		}
+	}
+	if !found {
+		t.Fatal("converged stack missing from the managed container inventory")
 	}
 }
 
@@ -128,7 +154,7 @@ func TestConvergePartialFailure(t *testing.T) {
 	}()
 
 	// Converge must report failure, and the error must name the broken service.
-	err = compose.Converge(ctx, raw, stackID, proj)
+	err = compose.Converge(ctx, raw, stackID, "v1", proj)
 	if err == nil {
 		t.Fatal("Converge returned nil, want an error naming the failed service")
 	}
@@ -198,7 +224,7 @@ func TestListManagedStackIDsAndPrune(t *testing.T) {
 		}
 	}()
 
-	if err := compose.Converge(ctx, raw, stackID, proj); err != nil {
+	if err := compose.Converge(ctx, raw, stackID, "v1", proj); err != nil {
 		t.Fatalf("Converge: %v", err)
 	}
 
@@ -259,7 +285,7 @@ func TestConvergeFailedPullKeepsRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadProject good: %v", err)
 	}
-	if err := compose.Converge(ctx, raw, stackID, good); err != nil {
+	if err := compose.Converge(ctx, raw, stackID, "v1", good); err != nil {
 		t.Fatalf("Converge good: %v", err)
 	}
 	before := stackContainerIDs(ctx, t, raw, stackID)
@@ -272,7 +298,7 @@ func TestConvergeFailedPullKeepsRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadProject bad: %v", err)
 	}
-	if err := compose.Converge(ctx, raw, stackID, bad); err == nil {
+	if err := compose.Converge(ctx, raw, stackID, "v1", bad); err == nil {
 		t.Fatal("Converge bad returned nil, want a pull error")
 	}
 	after := stackContainerIDs(ctx, t, raw, stackID)
@@ -314,7 +340,7 @@ func TestConvergeMovedTagRecreates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadProject: %v", err)
 	}
-	if err := compose.Converge(ctx, raw, stackID, proj); err != nil {
+	if err := compose.Converge(ctx, raw, stackID, "v1", proj); err != nil {
 		t.Fatalf("Converge A: %v", err)
 	}
 	before := stackContainerIDs(ctx, t, raw, stackID)
@@ -324,7 +350,7 @@ func TestConvergeMovedTagRecreates(t *testing.T) {
 
 	// Repoint the same tag at image B and converge again: the resolved ID changed → recreate.
 	tag("busybox:1.37")
-	if err := compose.Converge(ctx, raw, stackID, proj); err != nil {
+	if err := compose.Converge(ctx, raw, stackID, "v1", proj); err != nil {
 		t.Fatalf("Converge B: %v", err)
 	}
 	after := stackContainerIDs(ctx, t, raw, stackID)

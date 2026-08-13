@@ -21,26 +21,33 @@ import (
 	"github.com/moby/moby/client"
 )
 
+// Labels stamped onto every container orkestra creates. They are the only link between a
+// running container and the desired state that produced it — container identity, stack
+// pruning and the reported inventory all hinge on them.
 const (
-	specHashLabel = "orkestra.spec-hash"
-	stackIDLabel  = "orkestra.stack-id"
-	serviceLabel  = "orkestra.service"
-	managedLabel  = "orkestra.managed"
+	LabelSpecHash = "orkestra.spec-hash"
+	LabelStackID  = "orkestra.stack-id"
+	LabelService  = "orkestra.service"
+	LabelManaged  = "orkestra.managed"
+	// LabelStackVersion records the stack_version_id the container was created from, so the
+	// agent can report which version is actually running rather than which one was pushed.
+	LabelStackVersion = "orkestra.stack-version"
 )
 
-// Converge reconciles actual Docker state toward the desired Compose project.
-func Converge(ctx context.Context, dc *client.Client, stackID string, proj *composetypes.Project) error {
+// Converge reconciles actual Docker state toward the desired Compose project. version is the
+// stack_version_id being applied; it is stamped onto every container this call creates.
+func Converge(ctx context.Context, dc *client.Client, stackID, version string, proj *composetypes.Project) error {
 	existing, err := listStackContainers(ctx, dc, stackID)
 	if err != nil {
 		return fmt.Errorf("list existing containers: %w", err)
 	}
 	existingByService := make(map[string]containerSummary)
 	for _, c := range existing {
-		svc := c.Labels[serviceLabel]
+		svc := c.Labels[LabelService]
 		existingByService[svc] = c
 	}
 
-	var svcErrs []error
+	var svcErrs []ServiceFailure
 	for _, svcName := range sortedServices(proj) {
 		svc := proj.Services[svcName]
 
@@ -58,7 +65,7 @@ func Converge(ctx context.Context, dc *client.Client, stackID string, proj *comp
 		} else if err := ensureImage(ctx, dc, image, svc.PullPolicy); err != nil {
 			// Leave any existing container running and keep reconciling the rest of the stack.
 			slog.Error("resolve image failed", "stack", stackID, "service", svcName, "err", err)
-			svcErrs = append(svcErrs, fmt.Errorf("%s: %w", svcName, err))
+			svcErrs = append(svcErrs, ServiceFailure{Service: svcName, Err: err})
 			continue
 		}
 
@@ -68,7 +75,7 @@ func Converge(ctx context.Context, dc *client.Client, stackID string, proj *comp
 
 		// Phase 3: compare, then remove + recreate only if drifted.
 		if exists {
-			if cur.Labels[specHashLabel] == desired && cur.State == "running" {
+			if cur.Labels[LabelSpecHash] == desired && cur.State == "running" {
 				slog.Debug("service up-to-date", "stack", stackID, "service", svcName)
 				continue
 			}
@@ -77,11 +84,11 @@ func Converge(ctx context.Context, dc *client.Client, stackID string, proj *comp
 		}
 
 		slog.Info("creating container", "stack", stackID, "service", svcName)
-		if err := createAndStart(ctx, dc, stackID, proj.Name, svcName, svc, image, desired); err != nil {
+		if err := createAndStart(ctx, dc, stackID, version, proj.Name, svcName, svc, image, desired); err != nil {
 			// Partial failure: record and keep reconciling the rest of the stack. Aborting here
 			// would leave every alphabetically-later service and the orphan cleanup untouched.
 			slog.Error("create container failed", "stack", stackID, "service", svcName, "err", err)
-			svcErrs = append(svcErrs, fmt.Errorf("%s: %w", svcName, err))
+			svcErrs = append(svcErrs, ServiceFailure{Service: svcName, Err: err})
 			continue
 		}
 	}
@@ -93,16 +100,47 @@ func Converge(ctx context.Context, dc *client.Client, stackID string, proj *comp
 	}
 
 	if len(svcErrs) > 0 {
-		return fmt.Errorf("converge %s: %d service(s) failed: %w", stackID, len(svcErrs), errors.Join(svcErrs...))
+		return &ConvergeError{StackID: stackID, Services: svcErrs}
 	}
 	return nil
+}
+
+// ServiceFailure is one service that failed inside a stack reconcile.
+type ServiceFailure struct {
+	Service string
+	Err     error
+}
+
+// ConvergeError reports which services of a stack failed. Converge keeps reconciling after a
+// service fails, so a failed reconcile is a list, not a single cause — the agent reports the
+// per-service detail so the UI can point at the service instead of the whole stack.
+type ConvergeError struct {
+	StackID  string
+	Services []ServiceFailure
+}
+
+func (e *ConvergeError) Error() string {
+	errs := make([]error, 0, len(e.Services))
+	for _, f := range e.Services {
+		errs = append(errs, fmt.Errorf("%s: %w", f.Service, f.Err))
+	}
+	return fmt.Sprintf("converge %s: %d service(s) failed: %v", e.StackID, len(e.Services), errors.Join(errs...))
+}
+
+// Unwrap exposes the underlying causes to errors.Is/errors.As.
+func (e *ConvergeError) Unwrap() []error {
+	errs := make([]error, 0, len(e.Services))
+	for _, f := range e.Services {
+		errs = append(errs, f.Err)
+	}
+	return errs
 }
 
 // ListManagedStackIDs returns the distinct stack IDs of every orkestra-managed container on the
 // host. It is used to detect stacks that have disappeared from the desired state and must be
 // removed, since the Master always pushes the full desired state rather than a diff.
 func ListManagedStackIDs(ctx context.Context, dc *client.Client) ([]string, error) {
-	f := make(client.Filters).Add("label", managedLabel+"=true")
+	f := make(client.Filters).Add("label", LabelManaged+"=true")
 	res, err := dc.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f})
 	if err != nil {
 		return nil, err
@@ -110,7 +148,7 @@ func ListManagedStackIDs(ctx context.Context, dc *client.Client) ([]string, erro
 	seen := make(map[string]struct{})
 	ids := make([]string, 0, len(res.Items))
 	for _, c := range res.Items {
-		id := c.Labels[stackIDLabel]
+		id := c.Labels[LabelStackID]
 		if id == "" {
 			continue
 		}
@@ -121,6 +159,61 @@ func ListManagedStackIDs(ctx context.Context, dc *client.Client) ([]string, erro
 		ids = append(ids, id)
 	}
 	return ids, nil
+}
+
+// ManagedContainer is one orkestra-managed container as reported to the Master. It carries the
+// summary fields of a container list; restart count and start time need an inspect on top.
+type ManagedContainer struct {
+	ID           string
+	Name         string // no leading slash
+	Image        string
+	StackID      string
+	Service      string
+	SpecHash     string
+	StackVersion string
+	State        string // running | exited | restarting | ...
+	Status       string // "Up 3 hours"
+	Health       string // "" (no healthcheck) | starting | healthy | unhealthy
+}
+
+// ListManagedContainers returns every orkestra-managed container on the host, in any state.
+// It is the source of the inventory the agent reports in its StatusReport.
+func ListManagedContainers(ctx context.Context, dc *client.Client) ([]ManagedContainer, error) {
+	f := make(client.Filters).Add("label", LabelManaged+"=true")
+	res, err := dc.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ManagedContainer, 0, len(res.Items))
+	for _, c := range res.Items {
+		mc := ManagedContainer{
+			ID:           c.ID,
+			Image:        c.Image,
+			StackID:      c.Labels[LabelStackID],
+			Service:      c.Labels[LabelService],
+			SpecHash:     c.Labels[LabelSpecHash],
+			StackVersion: c.Labels[LabelStackVersion],
+			State:        string(c.State),
+			Status:       c.Status,
+		}
+		if len(c.Names) > 0 {
+			mc.Name = strings.TrimPrefix(c.Names[0], "/")
+		}
+		if c.Health != nil {
+			mc.Health = healthStatus(string(c.Health.Status))
+		}
+		out = append(out, mc)
+	}
+	return out, nil
+}
+
+// healthStatus normalises Docker's health status: a container without a healthcheck reports
+// "none", which is noise on the wire and in the UI — report it as empty instead.
+func healthStatus(s string) string {
+	if s == "none" {
+		return ""
+	}
+	return s
 }
 
 // Remove stops and deletes all managed containers for a stack.
@@ -157,8 +250,8 @@ type containerSummary struct {
 
 func listStackContainers(ctx context.Context, dc *client.Client, stackID string) ([]containerSummary, error) {
 	f := make(client.Filters).
-		Add("label", managedLabel+"=true").
-		Add("label", stackIDLabel+"="+stackID)
+		Add("label", LabelManaged+"=true").
+		Add("label", LabelStackID+"="+stackID)
 	res, err := dc.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f})
 	if err != nil {
 		return nil, err
@@ -179,12 +272,13 @@ func removeContainer(ctx context.Context, dc *client.Client, id string) error {
 
 // createAndStart creates and starts the container for a service. The image must already have been
 // resolved and pulled by the caller (Converge phase 1); createAndStart does not pull.
-func createAndStart(ctx context.Context, dc *client.Client, stackID, projectName, svcName string, svc composetypes.ServiceConfig, image, hash string) error {
+func createAndStart(ctx context.Context, dc *client.Client, stackID, version, projectName, svcName string, svc composetypes.ServiceConfig, image, hash string) error {
 	labels := map[string]string{
-		managedLabel:                 "true",
-		stackIDLabel:                 stackID,
-		serviceLabel:                 svcName,
-		specHashLabel:                hash,
+		LabelManaged:                 "true",
+		LabelStackID:                 stackID,
+		LabelService:                 svcName,
+		LabelSpecHash:                hash,
+		LabelStackVersion:            version,
 		"com.docker.compose.project": projectName,
 		"com.docker.compose.service": svcName,
 	}

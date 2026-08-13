@@ -25,6 +25,7 @@ type Querier interface {
 	DeleteUserByID(ctx context.Context, id string) error
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error)
 	GetActiveCertificateForAgent(ctx context.Context, agentID string) (Certificate, error)
+	GetAgentState(ctx context.Context, serverID string) (AgentState, error)
 	GetCertificateByFingerprint(ctx context.Context, fingerprint string) (Certificate, error)
 	GetEnrollmentTokenByHash(ctx context.Context, tokenHash string) (EnrollmentToken, error)
 	GetLatestStackVersion(ctx context.Context, stackID string) (StackVersion, error)
@@ -99,6 +100,7 @@ type Querier interface {
 	UpdateServer(ctx context.Context, arg UpdateServerParams) (Server, error)
 	UpdateServerStatus(ctx context.Context, arg UpdateServerStatusParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
+	UpsertAgentState(ctx context.Context, arg UpsertAgentStateParams) error
 	UpsertAgentUpdatePolicy(ctx context.Context, arg UpsertAgentUpdatePolicyParams) (UpdatePolicy, error)
 	UpsertAssignment(ctx context.Context, arg UpsertAssignmentParams) (Assignment, error)
 	UpsertAvailableUpdate(ctx context.Context, arg UpsertAvailableUpdateParams) (AvailableUpdate, error)

@@ -111,7 +111,7 @@ func TestEnrollAndFederateMetrics(t *testing.T) {
 	// --- Start the agent's persistent Connect stream ---
 	agentCtx, cancelAgent := context.WithCancel(ctx)
 	defer cancelAgent()
-	agent := conn.New(cfg, dir, func(context.Context, *orkestraV1.MasterMessage) error { return nil })
+	agent := conn.New(cfg, dir, func(context.Context, *orkestraV1.MasterMessage) error { return nil }, nil)
 	go agent.RunForever(agentCtx)
 
 	// --- Wait for the agent session to register ---

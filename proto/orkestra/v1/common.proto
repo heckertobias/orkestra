@@ -6,3 +6,10 @@ option go_package = "github.com/heckertobias/orkestra/internal/shared/gen/orkest
 
 // Empty placeholder used before google/protobuf/empty.proto is imported.
 message Empty {}
+
+// A single service's failure inside one stack reconcile. Shared between the Agent stream
+// (StackStatus.service_errors) and the UI API (StackState.service_errors).
+message ServiceError {
+  string service_name = 1;
+  string error        = 2;
+}

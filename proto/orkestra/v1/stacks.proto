@@ -14,6 +14,7 @@ service StackService {
   // Servers
   rpc ListServers(ListServersRequest)     returns (ListServersResponse);
   rpc GetServer(GetServerRequest)         returns (Server);
+  rpc GetServerState(GetServerStateRequest) returns (ServerState); // agent-reported inventory
   rpc UpdateServer(UpdateServerRequest)   returns (Server);
   rpc DeleteServer(DeleteServerRequest)   returns (Empty);
 
@@ -77,6 +78,40 @@ message UpdateServerRequest {
   string              id     = 1;
   string              name   = 2;
   map<string, string> labels = 3;
+}
+
+message GetServerStateRequest { string server_id = 1; }
+
+// The last inventory the agent reported for one server, enriched by the Master with
+// stack names and numeric versions. Persisted in agent_state.
+message ServerState {
+  string              server_id   = 1;
+  int64               reported_at = 2; // Unix ms; 0 = the agent has never reported
+  repeated StackState stacks      = 3;
+}
+
+message StackState {
+  string                  stack_id           = 1;
+  string                  stack_name         = 2; // resolved by the Master; empty if the stack is gone
+  string                  running_version_id = 3;
+  int32                   running_version    = 4; // numeric; 0 = unknown or mixed
+  bool                    drift_detected     = 5;
+  string                  drift_description  = 6;
+  string                  error              = 7;
+  repeated ServiceError   service_errors     = 8;
+  repeated ContainerState containers         = 9;
+}
+
+message ContainerState {
+  string id            = 1;
+  string name          = 2;
+  string image         = 3;
+  string service_name  = 4;
+  string state         = 5; // running | exited | restarting | ...
+  string status        = 6; // "Up 3 hours"
+  string health        = 7; // "" (no healthcheck) | starting | healthy | unhealthy
+  int32  restart_count = 8;
+  int64  started_at    = 9; // Unix ms
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
