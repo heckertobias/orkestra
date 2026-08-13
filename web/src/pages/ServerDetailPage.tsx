@@ -7,6 +7,7 @@ import {
   containerRows,
   failedStacks,
   containerStateVariant,
+  displayName,
   healthVariant,
   versionLabel,
   type ServerState,
@@ -199,8 +200,8 @@ export function ServerDetailPage() {
             )}
             {rows.map(c => (
               <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }} className="hover:bg-[var(--surface-2)]">
-                <td className="px-4 py-3 font-mono text-xs" style={{ color: 'var(--text)' }}>
-                  {c.name || c.id.slice(0, 12)}
+                <td className="px-4 py-3 font-mono text-xs whitespace-nowrap" style={{ color: 'var(--text)' }} title={c.name || c.id}>
+                  {displayName(c)}
                 </td>
                 <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>
                   <Link

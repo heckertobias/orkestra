@@ -4,6 +4,7 @@ import {
   containerRows,
   failedStacks,
   containerStateVariant,
+  displayName,
   healthVariant,
   versionLabel,
 } from './serverState'
@@ -129,6 +130,24 @@ describe('failedStacks', () => {
       stacks: [{ stack_id: 'st-a' }, { stack_id: 'st-b', error: 'converge failed' }],
     })
     expect(failedStacks(state).map(s => s.stackId)).toEqual(['st-b'])
+  })
+})
+
+describe('displayName', () => {
+  const row = (name: string, stackId = 'st-a', id = 'abcdef1234567890') =>
+    mapServerState({ stacks: [{ stack_id: stackId, containers: [{ id, name }] }] })
+      .stacks[0].containers[0]
+
+  it('drops the repeated stack-id prefix', () => {
+    expect(displayName(row('st-a-web-1234abcd'))).toBe('web-1234abcd')
+  })
+
+  it('leaves a name that does not carry the prefix untouched', () => {
+    expect(displayName(row('my-container'))).toBe('my-container')
+  })
+
+  it('falls back to a short container id when there is no name', () => {
+    expect(displayName(row(''))).toBe('abcdef123456')
   })
 })
 

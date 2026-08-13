@@ -130,6 +130,17 @@ export function failedStacks(state: ServerState | undefined): StackState[] {
   return (state?.stacks ?? []).filter(s => s.error !== '')
 }
 
+/**
+ * Container names are `<stack-id>-<service>-<suffix>` because the compose project name is the
+ * stack ID. The stack is already its own column, so the prefix is repeated noise — drop it and
+ * leave the part that identifies this container.
+ */
+export function displayName(row: ContainerRow): string {
+  if (row.name === '') return row.id.slice(0, 12)
+  const prefix = `${row.stackId}-`
+  return row.name.startsWith(prefix) ? row.name.slice(prefix.length) : row.name
+}
+
 export function containerStateVariant(state: string): BadgeVariant {
   if (state === 'running') return 'online'
   if (state === 'exited' || state === 'created' || state === 'paused') return 'offline'
