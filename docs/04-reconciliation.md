@@ -88,6 +88,20 @@ agent manages, which is correct: it means the server has no assignments.
 The result is deterministic per assignment and does not depend on what happens to be set in the
 agent process's environment.
 
+A reference that has **no value and no default is an error, not an empty string**. Compose itself
+would substitute silently, turning `image: ${REGISTRY}/app:${TAG}` into `/app:` and surfacing a
+Docker error that names neither variable. Because the assignment's `env_values` are the complete
+input to interpolation, the Master can decide this up front: `AssignStack` refuses an assignment
+whose compose references unresolvable variables and names them, and the agent repeats the check
+before loading a project as a backstop for desired state that predates the rule. Whether a stack is
+complete is a property of the *assignment*, not of the stack version — the same version can be
+complete for one server and incomplete for another.
+
+An **empty value counts as unset**, matching Compose's own `:-` semantics. The escape hatches are
+respected and never flagged: `${VAR:-default}` and `${VAR-default}` supply a value, `${VAR:+alt}`
+resolves deliberately to nothing when unset, and `${VAR:?message}` is left to compose-go, which
+fails with the author's own message. To deploy an intentionally empty value, write `${VAR:-}`.
+
 **Partial failure.** A service that fails to build, pull, create, or start is reported per service;
 the remaining services of the stack are still reconciled. One broken service does not take the rest
 of the stack with it.

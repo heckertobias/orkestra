@@ -42,6 +42,26 @@ func validateComposeOrError(composeYAML string) error {
 	return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("compose validation failed: %s", strings.Join(msgs, "; ")))
 }
 
+// validateEnvValuesOrError refuses an assignment whose compose YAML references variables that would
+// interpolate to an empty string (#81). Since #76 the assignment's env values are the *complete*
+// input to interpolation, so the Master can decide this before anything reaches an agent — and it
+// is the only place that can, because the same stack version may be complete for one server and
+// incomplete for another. Without the check `image: ${REGISTRY}/app:${TAG}` silently becomes
+// `/app:` and the first symptom is a Docker error naming neither variable.
+func validateEnvValuesOrError(composeYAML string, values map[string]string) error {
+	missing := sharedcompose.MissingVars(composeYAML, values)
+	if len(missing) == 0 {
+		return nil
+	}
+	msgs := make([]string, len(missing))
+	for i, ref := range missing {
+		msgs[i] = fmt.Sprintf("%s (line %d)", ref.Name, ref.Line)
+	}
+	return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf(
+		"missing values for compose variables: %s — supply a value, or give the reference a default such as ${VAR:-fallback}",
+		strings.Join(msgs, ", ")))
+}
+
 // CreateStack creates a new stack with an initial version.
 // Any operator (any scope) may create a stack definition.
 func (h *StackServiceHandler) CreateStack(ctx context.Context, req *connect.Request[orkestraV1.CreateStackRequest]) (*connect.Response[orkestraV1.Stack], error) {
@@ -227,13 +247,31 @@ func (h *StackServiceHandler) AssignStack(ctx context.Context, req *connect.Requ
 		return nil, errPermission("operator access required on this server/stack")
 	}
 	r := req.Msg
-	versionID := r.StackVersionId
-	if versionID == "" {
+	var version store.StackVersion
+	if r.StackVersionId == "" {
 		latest, err := h.q.GetLatestStackVersion(ctx, r.StackId)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("no versions for stack"))
 		}
-		versionID = latest.ID
+		version = latest
+	} else {
+		v, err := h.q.GetStackVersion(ctx, r.StackVersionId)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("stack version not found"))
+		}
+		// The version must belong to the stack being assigned — otherwise the caller's permission
+		// check and the env validation below both apply to a different stack's compose.
+		if v.StackID != r.StackId {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("stack version belongs to a different stack"))
+		}
+		version = v
+	}
+	versionID := version.ID
+
+	// Checked for every desired status, not just "running": the values are being typed now, so the
+	// error belongs now rather than whenever the stack is first started.
+	if err := validateEnvValuesOrError(version.ComposeYaml, r.EnvValues); err != nil {
+		return nil, err
 	}
 
 	status := r.DesiredStatus

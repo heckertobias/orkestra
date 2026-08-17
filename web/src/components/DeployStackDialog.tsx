@@ -105,7 +105,14 @@ export function DeployStackDialog({ stackId, stackName, versions, onClose, onDep
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const missingCount = names.filter(n => !(values[n] ?? '').trim()).length
+  // Variables the deploy would leave unresolved (#81). A reference that carries a `${VAR:-default}`
+  // is never missing, which is the same rule the Master applies in AssignStack — an empty value
+  // counts as unset on both sides. Deploying anyway would interpolate an empty string and fail
+  // later with a Docker error naming none of these.
+  const missingNames = useMemo(
+    () => names.filter(n => !(values[n] ?? '').trim() && !(n in (version?.envDefaults ?? {}))),
+    [names, values, version],
+  )
 
   async function handleDeploy() {
     if (!serverId) { setError('Select a server'); return }
@@ -208,9 +215,11 @@ export function DeployStackDialog({ stackId, stackName, versions, onClose, onDep
                 ))}
               </div>
             )}
-            {missingCount > 0 && (
-              <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
-                {missingCount} variable{missingCount === 1 ? '' : 's'} without a value.
+            {missingNames.length > 0 && (
+              <p className="text-xs mt-2" style={{ color: 'var(--error)' }}>
+                No value for <code className="font-mono">{missingNames.join(', ')}</code>
+                {' '}— supply a value, or give the reference a default such as{' '}
+                <code className="font-mono">{'${VAR:-fallback}'}</code>.
               </p>
             )}
           </div>
@@ -220,7 +229,7 @@ export function DeployStackDialog({ stackId, stackName, versions, onClose, onDep
           <button onClick={onClose} className="px-4 py-1.5 rounded border text-sm" style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
             Cancel
           </button>
-          <button onClick={handleDeploy} disabled={submitting || !serverId || !versionId}
+          <button onClick={handleDeploy} disabled={submitting || !serverId || !versionId || missingNames.length > 0}
             className="px-4 py-1.5 rounded text-sm font-medium disabled:opacity-50" style={{ backgroundColor: 'var(--accent)', color: '#0d1117' }}>
             {submitting ? 'Deploying…' : 'Deploy'}
           </button>

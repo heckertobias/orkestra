@@ -5,6 +5,7 @@ package compose
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	composetypes "github.com/compose-spec/compose-go/v2/types"
 	"gopkg.in/yaml.v3"
@@ -26,6 +27,16 @@ func LoadProject(composeYAML string, stackID string, envVars map[string]string) 
 	env := make(map[string]string)
 	for k, v := range envVars {
 		env[k] = v
+	}
+
+	// Refuse to converge a project whose `${VAR}` references would interpolate to an empty string
+	// (#81). compose-go substitutes silently, so `image: ${REGISTRY}/app:${TAG}` would become
+	// `/app:` and fail later with a Docker error naming neither variable. The Master rejects this at
+	// assign time; this is the backstop for desired state that predates that check or reaches the
+	// agent another way. The error propagates up through the reconciler and is reported per stack.
+	if missing := sharedcompose.MissingVars(composeYAML, env); len(missing) > 0 {
+		return nil, fmt.Errorf("unresolved compose variables (no value and no default): %s",
+			strings.Join(sharedcompose.VarNames(missing), ", "))
 	}
 
 	// Use compose-go loader with an in-memory config.
