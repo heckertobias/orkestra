@@ -10,6 +10,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/heckertobias/orkestra/internal/master/pki"
 	"github.com/heckertobias/orkestra/internal/master/store"
@@ -318,6 +319,19 @@ func (h *Handler) handleStatusReport(ctx context.Context, agentID string, report
 		}); err != nil {
 			slog.Error("persist available update", "agent_id", agentID, "layer", u.Layer, "err", err)
 		}
+	}
+
+	// Persist the reported inventory (best-effort). The report is a full snapshot of the host,
+	// so the row is replaced rather than merged. Stored as protojson so the schema of the blob
+	// is the StatusReport message itself, with no second hand-written shape to keep in sync.
+	if stateJSON, err := protojson.Marshal(report); err != nil {
+		slog.Error("marshal agent state", "agent_id", agentID, "err", err)
+	} else if err := h.q.UpsertAgentState(ctx, store.UpsertAgentStateParams{
+		ServerID:  agentID,
+		StateJson: stateJSON,
+		UpdatedAt: now,
+	}); err != nil {
+		slog.Error("persist agent state", "agent_id", agentID, "err", err)
 	}
 
 	slog.Debug("status report received",

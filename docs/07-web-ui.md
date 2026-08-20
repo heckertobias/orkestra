@@ -101,9 +101,12 @@ on `localhost:5173` and the Master (built with `-tags dev`) proxies to it.
 #### `/servers/$id` — Server detail
 
 - Header: name, status, hostname, agent version, Docker version, architecture, labels.
-- Container table (service, image, state, status, restarts, actions). The agent-state inventory
-  that feeds this table is not implemented yet, so it stays empty for now — as do the per-container
-  log/stats/exec actions, which depend on the streaming pipeline.
+- Container table (container, stack/service, image, state, health, status, restarts, actions), fed
+  by `GetServerState` — the inventory the agent last reported, refreshed on the same 30 s cadence
+  and stamped with how long ago it arrived. The stack cell links to the stack. Per-container
+  log/stats/exec actions stay disabled: they depend on the streaming pipeline and command dispatch.
+- A stack whose last reconcile failed is shown above the table with its per-service errors, which
+  is how a failure that produced no container at all becomes visible.
 
 #### `/stacks` — Stacks
 

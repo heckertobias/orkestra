@@ -150,9 +150,11 @@ func (h *StackServiceHandler) DeleteServer(ctx context.Context, req *connect.Req
 
 func (h *StackServiceHandler) ExecOnContainer(ctx context.Context, req *connect.Request[orkestraV1.ExecOnContainerRequest]) (*connect.Response[orkestraV1.ExecOnContainerResponse], error) {
 	u := masterauth.UserFromContext(ctx)
-	// Container→Stack resolution is not yet available (agent_state not populated).
-	// Use server-level check: operator access on the server (stack_id unset = any stack).
-	if !masterauth.CanOperateOn(u, req.Msg.ServerId, "") {
+	// Authorise against the stack the container belongs to, resolved from the inventory the
+	// agent reported. A container the Master has never seen resolves to "", which requires
+	// operator access on the whole server — the safe direction when attribution is unknown.
+	stackID := h.containerStackID(ctx, req.Msg.ServerId, req.Msg.ContainerId)
+	if !masterauth.CanOperateOn(u, req.Msg.ServerId, stackID) {
 		return nil, errPermission("operator access required on this server")
 	}
 	// The agent does not dispatch container commands yet, so claiming success would be a lie.

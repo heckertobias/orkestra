@@ -107,8 +107,9 @@ Useful context before hunting for "missing" code — these are known gaps, not b
   the agent-side streamers exist but are not dispatched; `ExecCommand` is not handled by the agent.
 - **Secret delivery.** Secrets can be stored and revealed, but `secret_refs` is written empty and
   the reconciler does not resolve secrets into `ApplyDesiredState`.
-- **Agent state / inventory.** `agent_state` is never written, so container inventory and drift
-  reporting in the UI stay empty.
+- **Drift reporting.** `agent_state` now carries the reported container inventory, but
+  `drift_detected` / `drift_description` are still never set, so drift stays invisible in the UI.
+  Unmanaged containers (no orkestra labels) are not reported either.
 - **Fleet updates.** Only the schema and the Master-side persistence of reported availability.
 - **Audit coverage.** Only auth/user and secret actions are audited; stack/server/role mutations
   are not.

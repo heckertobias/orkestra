@@ -31,16 +31,31 @@ const renewThreshold = 30 * 24 * time.Hour
 // MessageHandler processes a MasterMessage received from the Master.
 type MessageHandler func(ctx context.Context, msg *orkestraV1.MasterMessage) error
 
+// StatusFunc produces the StatusReport sent to the Master on connect and on every heartbeat.
+type StatusFunc func(ctx context.Context) *orkestraV1.StatusReport
+
 // Agent maintains the persistent connection to the Master.
 type Agent struct {
-	cfg     *enroll.Config
-	dataDir string
-	handler MessageHandler
+	cfg      *enroll.Config
+	dataDir  string
+	handler  MessageHandler
+	statusFn StatusFunc
 }
 
-// New creates an Agent connection manager.
-func New(cfg *enroll.Config, dataDir string, handler MessageHandler) *Agent {
-	return &Agent{cfg: cfg, dataDir: dataDir, handler: handler}
+// New creates an Agent connection manager. statusFn may be nil, in which case the periodic
+// report degrades to a bare heartbeat carrying no inventory.
+func New(cfg *enroll.Config, dataDir string, handler MessageHandler, statusFn StatusFunc) *Agent {
+	return &Agent{cfg: cfg, dataDir: dataDir, handler: handler, statusFn: statusFn}
+}
+
+// statusReport builds the report to send, falling back to a bare heartbeat.
+func (a *Agent) statusReport(ctx context.Context) *orkestraV1.StatusReport {
+	if a.statusFn != nil {
+		if r := a.statusFn(ctx); r != nil {
+			return r
+		}
+	}
+	return &orkestraV1.StatusReport{ReportedAtMs: time.Now().UnixMilli()}
 }
 
 // RunForever connects to the Master and reconnects with exponential backoff on failure.
@@ -137,22 +152,26 @@ func (a *Agent) connect(ctx context.Context) error {
 	})
 	slog.Info("connected to master", "master", a.cfg.MasterAddr, "agent_id", a.cfg.AgentID)
 
-	// Periodic StatusReports (heartbeat).
+	// Periodic StatusReports (heartbeat + container inventory). The first one goes out right
+	// after Hello: waiting a full tick would leave the Master — and the UI — without an
+	// inventory for the first 30 s of every connection.
+	sendStatus := func() {
+		send(&orkestraV1.AgentMessage{
+			Payload: &orkestraV1.AgentMessage_StatusReport{
+				StatusReport: a.statusReport(connCtx),
+			},
+		})
+	}
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	go func() {
+		sendStatus()
 		for {
 			select {
 			case <-connCtx.Done():
 				return
 			case <-ticker.C:
-				send(&orkestraV1.AgentMessage{
-					Payload: &orkestraV1.AgentMessage_StatusReport{
-						StatusReport: &orkestraV1.StatusReport{
-							ReportedAtMs: time.Now().UnixMilli(),
-						},
-					},
-				})
+				sendStatus()
 			}
 		}
 	}()

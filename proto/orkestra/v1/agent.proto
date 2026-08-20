@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package orkestra.v1;
 
+import "orkestra/v1/common.proto";
+
 option go_package = "github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1;orkestraV1";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -172,11 +174,13 @@ message AvailableUpdate {
 
 message StackStatus {
   string                   stack_id          = 1;
+  // stack_version_id of the containers actually running; empty while a rollout is mixed.
   string                   running_version   = 2;
   repeated ContainerStatus containers        = 3;
   bool                     drift_detected    = 4;
   string                   drift_description = 5;
-  string                   error             = 6;
+  string                   error             = 6; // summary of the last reconcile failure
+  repeated ServiceError    service_errors    = 7; // per-service detail behind that summary
 }
 
 message ContainerStatus {
@@ -186,6 +190,9 @@ message ContainerStatus {
   string status        = 4; // "Up 3 hours"
   int32  restart_count = 5;
   int64  started_at_ms = 6;
+  string health        = 7; // "" (no healthcheck) | starting | healthy | unhealthy
+  string name          = 8; // container name, no leading slash
+  string image         = 9; // image reference as configured
 }
 
 message LogChunk {
