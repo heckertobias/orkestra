@@ -192,9 +192,11 @@ type Server struct {
 }
 
 type ServerConfig struct {
-	ID        int32  `json:"id"`
-	PublicUrl string `json:"public_url"`
-	UpdatedAt int64  `json:"updated_at"`
+	ID                  int32  `json:"id"`
+	PublicUrl           string `json:"public_url"`
+	UpdatedAt           int64  `json:"updated_at"`
+	EventsRetentionDays int32  `json:"events_retention_days"`
+	AuditRetentionDays  int32  `json:"audit_retention_days"`
 }
 
 type Session struct {

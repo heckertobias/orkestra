@@ -10,33 +10,54 @@ import (
 )
 
 const getServerConfig = `-- name: GetServerConfig :one
-SELECT id, public_url, updated_at FROM server_config LIMIT 1
+SELECT id, public_url, updated_at, events_retention_days, audit_retention_days FROM server_config LIMIT 1
 `
 
 func (q *Queries) GetServerConfig(ctx context.Context) (ServerConfig, error) {
 	row := q.db.QueryRow(ctx, getServerConfig)
 	var i ServerConfig
-	err := row.Scan(&i.ID, &i.PublicUrl, &i.UpdatedAt)
+	err := row.Scan(
+		&i.ID,
+		&i.PublicUrl,
+		&i.UpdatedAt,
+		&i.EventsRetentionDays,
+		&i.AuditRetentionDays,
+	)
 	return i, err
 }
 
 const upsertServerConfig = `-- name: UpsertServerConfig :one
-INSERT INTO server_config (id, public_url, updated_at)
-VALUES (1, $1, $2)
+INSERT INTO server_config (id, public_url, events_retention_days, audit_retention_days, updated_at)
+VALUES (1, $1, $2, $3, $4)
 ON CONFLICT (id) DO UPDATE SET
-    public_url = excluded.public_url,
-    updated_at = excluded.updated_at
-RETURNING id, public_url, updated_at
+    public_url            = excluded.public_url,
+    events_retention_days = excluded.events_retention_days,
+    audit_retention_days  = excluded.audit_retention_days,
+    updated_at            = excluded.updated_at
+RETURNING id, public_url, updated_at, events_retention_days, audit_retention_days
 `
 
 type UpsertServerConfigParams struct {
-	PublicUrl string `json:"public_url"`
-	UpdatedAt int64  `json:"updated_at"`
+	PublicUrl           string `json:"public_url"`
+	EventsRetentionDays int32  `json:"events_retention_days"`
+	AuditRetentionDays  int32  `json:"audit_retention_days"`
+	UpdatedAt           int64  `json:"updated_at"`
 }
 
 func (q *Queries) UpsertServerConfig(ctx context.Context, arg UpsertServerConfigParams) (ServerConfig, error) {
-	row := q.db.QueryRow(ctx, upsertServerConfig, arg.PublicUrl, arg.UpdatedAt)
+	row := q.db.QueryRow(ctx, upsertServerConfig,
+		arg.PublicUrl,
+		arg.EventsRetentionDays,
+		arg.AuditRetentionDays,
+		arg.UpdatedAt,
+	)
 	var i ServerConfig
-	err := row.Scan(&i.ID, &i.PublicUrl, &i.UpdatedAt)
+	err := row.Scan(
+		&i.ID,
+		&i.PublicUrl,
+		&i.UpdatedAt,
+		&i.EventsRetentionDays,
+		&i.AuditRetentionDays,
+	)
 	return i, err
 }

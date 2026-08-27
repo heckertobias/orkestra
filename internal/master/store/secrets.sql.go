@@ -54,8 +54,8 @@ func (q *Queries) GetSecret(ctx context.Context, id string) (Secret, error) {
 }
 
 const insertAuditLog = `-- name: InsertAuditLog :exec
-INSERT INTO audit_log (ts, actor_id, actor_name, action, target_type, target_id, ip_address, error)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO audit_log (ts, actor_id, actor_name, action, target_type, target_id, ip_address, error, after_json)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 `
 
 type InsertAuditLogParams struct {
@@ -67,6 +67,7 @@ type InsertAuditLogParams struct {
 	TargetID   *string `json:"target_id"`
 	IpAddress  *string `json:"ip_address"`
 	Error      *string `json:"error"`
+	AfterJson  []byte  `json:"after_json"`
 }
 
 func (q *Queries) InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error {
@@ -79,6 +80,7 @@ func (q *Queries) InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) 
 		arg.TargetID,
 		arg.IpAddress,
 		arg.Error,
+		arg.AfterJson,
 	)
 	return err
 }

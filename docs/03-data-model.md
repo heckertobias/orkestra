@@ -339,14 +339,20 @@ CREATE TABLE smtp_config (
 
 -- Deployment-wide settings set in the UI (single row)
 CREATE TABLE server_config (
-  id         INTEGER PRIMARY KEY,
-  public_url TEXT    NOT NULL DEFAULT '',  -- browser-facing base URL
-  updated_at BIGINT  NOT NULL DEFAULT 0
+  id                    INTEGER PRIMARY KEY,
+  public_url            TEXT    NOT NULL DEFAULT '',  -- browser-facing base URL
+  events_retention_days INTEGER NOT NULL DEFAULT -1,  -- -1 = use env default, 0 = keep forever
+  audit_retention_days  INTEGER NOT NULL DEFAULT -1,  -- -1 = use env default, 0 = keep forever
+  updated_at            BIGINT  NOT NULL DEFAULT 0
 );
 ```
 
 `server_config.public_url` takes precedence over `ORKESTRA_PUBLIC_URL` for the OIDC redirect URI,
 email links, and the first-run setup link — see [08-deployment.md](08-deployment.md).
+
+The two retention columns follow the same precedence and use a three-state value: `-1` inherits the
+startup default (`ORKESTRA_EVENTS_RETENTION_DAYS` / `ORKESTRA_AUDIT_RETENTION_DAYS`), `0` keeps rows
+forever, and any positive value is a number of days.
 
 ### Audit & Events
 
@@ -387,8 +393,16 @@ CREATE INDEX idx_events_server ON events(server_id);
 ```
 
 The `event_type` values above are the defined vocabulary; the Master currently emits `agent`
-events (connect / disconnect). Both tables grow without bound — there is no retention job yet. See
-[06-security-auth.md](06-security-auth.md) for which actions are audited.
+events (connect / disconnect). See [06-security-auth.md](06-security-auth.md) for which actions are
+audited.
+
+**Retention.** A janitor on the Master deletes rows past their window every hour, in batches of
+5 000 so it never holds a long lock on a table the UI reads from. `events` defaults to 30 days;
+`audit_log` defaults to **keeping everything** and only prunes once an admin sets a window, because
+the audit trail is the compliance surface and must not shrink by accident. Expired `sessions` rows
+are swept in the same pass with no window to configure — once `expires_at` has passed the row
+cannot authenticate anyone. The job reports through logs and Prometheus and never writes an
+`events` row about its own work. See [08-deployment.md](08-deployment.md) § Data Retention.
 
 ---
 

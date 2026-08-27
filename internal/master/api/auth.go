@@ -978,10 +978,32 @@ func (h *AuthServiceHandler) GetServerConfig(ctx context.Context, _ *connect.Req
 	}
 	cfg, err := h.q.GetServerConfig(ctx)
 	if err != nil {
-		// No row yet — return empty (falls back to ORKESTRA_PUBLIC_URL / bind address).
-		return connect.NewResponse(&orkestraV1.ServerConfig{}), nil
+		// No row yet — nothing is configured, so every setting falls back to its startup
+		// default. For the retention windows that is -1 ("inherit the env var"), not 0,
+		// which would mean the much stronger "keep these rows forever".
+		return connect.NewResponse(&orkestraV1.ServerConfig{
+			EventsRetentionDays: retentionUnset,
+			AuditRetentionDays:  retentionUnset,
+		}), nil
 	}
-	return connect.NewResponse(&orkestraV1.ServerConfig{PublicUrl: cfg.PublicUrl}), nil
+	return connect.NewResponse(&orkestraV1.ServerConfig{
+		PublicUrl:           cfg.PublicUrl,
+		EventsRetentionDays: cfg.EventsRetentionDays,
+		AuditRetentionDays:  cfg.AuditRetentionDays,
+	}), nil
+}
+
+// retentionUnset is the retention window meaning "inherit the startup default". 0 is taken:
+// it means "keep forever". See internal/master/retention.
+const retentionUnset int32 = -1
+
+// normalizeRetention clamps a retention window to the three states the rest of the system
+// understands: -1 (inherit the env default), 0 (keep forever), or a positive number of days.
+func normalizeRetention(days int32) int32 {
+	if days < 0 {
+		return retentionUnset
+	}
+	return days
 }
 
 // UpdateServerConfig saves the deployment-wide server configuration (admin only). Changing the
@@ -992,14 +1014,22 @@ func (h *AuthServiceHandler) UpdateServerConfig(ctx context.Context, req *connec
 		return nil, err
 	}
 	publicURL := strings.TrimRight(strings.TrimSpace(req.Msg.PublicUrl), "/")
+	eventsDays := normalizeRetention(req.Msg.EventsRetentionDays)
+	auditDays := normalizeRetention(req.Msg.AuditRetentionDays)
 
 	cfg, err := h.q.UpsertServerConfig(ctx, store.UpsertServerConfigParams{
-		PublicUrl: publicURL,
-		UpdatedAt: time.Now().UnixMilli(),
+		PublicUrl:           publicURL,
+		EventsRetentionDays: eventsDays,
+		AuditRetentionDays:  auditDays,
+		UpdatedAt:           time.Now().UnixMilli(),
 	})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("save server config: %w", err))
 	}
+
+	// Shortening a retention window is a destructive act on the audit trail itself, so the
+	// change is audited even though the rest of the settings surface is not (see #85).
+	h.auditServerConfig(ctx, cfg)
 
 	// Re-initialise the live provider so the OIDC redirect URI picks up the new public URL
 	// without a restart (mirrors UpdateOIDCConfig).
@@ -1008,7 +1038,39 @@ func (h *AuthServiceHandler) UpdateServerConfig(ctx context.Context, req *connec
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload oidc provider: %w", err))
 		}
 	}
-	return connect.NewResponse(&orkestraV1.ServerConfig{PublicUrl: cfg.PublicUrl}), nil
+	return connect.NewResponse(&orkestraV1.ServerConfig{
+		PublicUrl:           cfg.PublicUrl,
+		EventsRetentionDays: cfg.EventsRetentionDays,
+		AuditRetentionDays:  cfg.AuditRetentionDays,
+	}), nil
+}
+
+// auditServerConfig records a server-config change, snapshotting the resulting settings in
+// after_json so a shortened retention window is traceable to who set it and to what.
+func (h *AuthServiceHandler) auditServerConfig(ctx context.Context, cfg store.ServerConfig) {
+	after, err := json.Marshal(map[string]any{
+		"public_url":            cfg.PublicUrl,
+		"events_retention_days": cfg.EventsRetentionDays,
+		"audit_retention_days":  cfg.AuditRetentionDays,
+	})
+	if err != nil {
+		slog.Warn("audit snapshot failed", "action", "config.update", "err", err)
+		after = nil
+	}
+	p := store.InsertAuditLogParams{
+		Ts:         time.Now().UnixMilli(),
+		Action:     "config.update",
+		TargetType: "server_config",
+		TargetID:   ptrString("1"),
+		AfterJson:  after,
+	}
+	if u := masterauth.UserFromContext(ctx); u != nil {
+		p.ActorID = ptrString(u.ID)
+		p.ActorName = ptrString(u.Username)
+	}
+	if err := h.q.InsertAuditLog(ctx, p); err != nil {
+		slog.Warn("audit log insert failed", "action", "config.update", "err", err)
+	}
 }
 
 // GetOIDCConfig returns the current OIDC configuration.

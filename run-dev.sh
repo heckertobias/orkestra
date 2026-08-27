@@ -320,10 +320,12 @@ auto_configure() {
   echo "  ✓ Logged in"
 
   # Set the deployment-wide public URL (used for OIDC redirect, email, and setup links).
+  # UpdateServerConfig upserts every column, so the retention windows have to be sent too;
+  # -1 leaves them inheriting the startup defaults instead of pinning them to "keep forever".
   if curl -sf -b "$COOKIE_JAR" \
       -H "Content-Type: application/json" \
       -H "Connect-Protocol-Version: 1" \
-      -d "{\"public_url\":\"http://localhost:${UI_PORT}\"}" \
+      -d "{\"public_url\":\"http://localhost:${UI_PORT}\",\"events_retention_days\":-1,\"audit_retention_days\":-1}" \
       "http://localhost:${UI_PORT}/orkestra.v1.AuthService/UpdateServerConfig" > /dev/null; then
     echo "  ✓ Public URL set"
   else

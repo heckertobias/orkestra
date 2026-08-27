@@ -24,8 +24,8 @@ DELETE FROM secrets WHERE id = $1;
 SELECT COUNT(*) FROM secret_bindings WHERE secret_id = $1;
 
 -- name: InsertAuditLog :exec
-INSERT INTO audit_log (ts, actor_id, actor_name, action, target_type, target_id, ip_address, error)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+INSERT INTO audit_log (ts, actor_id, actor_name, action, target_type, target_id, ip_address, error, after_json)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
 
 -- name: ListAuditLog :many
 SELECT * FROM audit_log ORDER BY ts DESC LIMIT $1;
