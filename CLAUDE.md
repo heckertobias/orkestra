@@ -44,12 +44,15 @@ npm run build && npm run lint && npm test   # tsc + vite build, eslint, vitest
 
 ## Code generation — run after editing schemas
 
-Generated directories (`internal/shared/gen/`, `web/gen/`) are gitignored and regenerated locally
-or in CI. The sqlc output in `internal/master/store/*.sql.go` **is** committed. After changing the
-relevant source you MUST regenerate:
+The Go generated code **is** committed — both `internal/shared/gen/` (buf) and
+`internal/master/store/*.sql.go` (sqlc) — so a plain clone builds without buf/sqlc installed. CI
+regenerates and fails if the result differs, so **you MUST commit the regenerated files in the same
+change**. Only `web/gen/` (TypeScript) stays gitignored. After changing the relevant source:
 
 - Edit any `proto/orkestra/v1/*.proto` → `make proto` (`buf generate`). Outputs Go to
-  `internal/shared/gen/` and TypeScript Connect clients to `web/gen/`. Lint protos with `buf lint`.
+  `internal/shared/gen/` (commit it) and TypeScript Connect clients to `web/gen/`. Lint protos with
+  `buf lint`. Plugin versions in `buf.gen.yaml` are pinned — bump them deliberately, then
+  regenerate.
 - Edit SQL in `internal/master/store/queries/*.sql` or the migrations → `make sqlc`
   (`sqlc generate`). Outputs type-safe Go into `internal/master/store/`. Config: `sqlc.yaml`.
 - The backend build needs only Go + buf; Node is only required to build the web UI.

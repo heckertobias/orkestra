@@ -40,7 +40,7 @@ orkestra/
 │   │   └── metrics/             # Prometheus collectors (Agent) + text-format gatherer
 │   ├── shared/
 │   │   ├── compose/             # Compose validation shared by Master (editor) and Agent
-│   │   ├── gen/                 # Generated protobuf + Connect code, Go (gitignored)
+│   │   ├── gen/                 # Generated protobuf + Connect code, Go (committed)
 │   │   └── version/             # Build-time version info
 │   └── e2e/                     # End-to-end tests (Postgres, Docker daemon)
 ├── web/                         # React SPA (Vite + TypeScript)
@@ -145,8 +145,16 @@ The backend build needs only Go and buf; Node is required only to build the web 
 1. `protoc-gen-go` + `protoc-gen-connect-go` → `internal/shared/gen/`
 2. `protoc-gen-es` + `protoc-gen-connect-es` → `web/gen/`
 
-Both generated directories are gitignored and regenerated via `make proto` locally or in CI before
-the build step. The sqlc output under `internal/master/store/` is committed.
+The Go output under `internal/shared/gen/` is committed, as is the sqlc output under
+`internal/master/store/`: a fresh clone then builds with the Go toolchain alone, and `go build`,
+`go mod tidy` and any tool that only clones the repo (Dependabot's `gomod` updater, for one) work
+without running `buf` first. CI regenerates and fails the build if the result differs from what is
+committed, so the checked-in code cannot drift from the `.proto` sources. Plugin versions in
+`buf.gen.yaml` are pinned for the same reason — an unpinned `remote:` resolves to whatever
+buf.build publishes that day.
+
+The TypeScript output under `web/gen/` stays gitignored and is regenerated via `make proto`; the
+frontend build runs it anyway, and nothing outside the Node toolchain needs those files.
 
 ### Embedding the Web UI
 
