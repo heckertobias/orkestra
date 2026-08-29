@@ -48,4 +48,14 @@ var (
 		Name: "orkestra_secret_resolves_total",
 		Help: "Secret provider calls by provider and status.",
 	}, []string{"provider", "status"})
+
+	RetentionDeletedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "orkestra_retention_deleted_rows_total",
+		Help: "Rows deleted by the retention job, by table.",
+	}, []string{"table"})
+
+	RetentionLastSuccess = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "orkestra_retention_last_success_timestamp_seconds",
+		Help: "Unix timestamp of the last retention sweep that completed without errors.",
+	})
 )

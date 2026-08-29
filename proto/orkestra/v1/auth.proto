@@ -185,12 +185,20 @@ message UpdateSMTPConfigRequest {
 // ServerConfig holds deployment-wide settings set in the UI. public_url is the
 // browser-facing base URL and, when set, overrides ORKESTRA_PUBLIC_URL for the
 // OIDC redirect, email links, and the setup link.
+//
+// The retention windows say how long the Master keeps rows in its append-only
+// tables. Each has three states: -1 inherits the startup default, 0 keeps rows
+// forever, and any positive value is a number of days.
 message ServerConfig {
-  string public_url = 1; // browser-facing base URL (e.g. https://orkestra.example.com); empty = use env/default
+  string public_url            = 1; // browser-facing base URL (e.g. https://orkestra.example.com); empty = use env/default
+  int32  events_retention_days = 2; // -1 = use ORKESTRA_EVENTS_RETENTION_DAYS, 0 = keep forever
+  int32  audit_retention_days  = 3; // -1 = use ORKESTRA_AUDIT_RETENTION_DAYS, 0 = keep forever
 }
 
 message UpdateServerConfigRequest {
-  string public_url = 1;
+  string public_url            = 1;
+  int32  events_retention_days = 2;
+  int32  audit_retention_days  = 3;
 }
 
 message RoleBinding {

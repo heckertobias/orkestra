@@ -27,6 +27,7 @@ import (
 	masteroidc "github.com/heckertobias/orkestra/internal/master/oidc"
 	"github.com/heckertobias/orkestra/internal/master/pki"
 	masterreconciler "github.com/heckertobias/orkestra/internal/master/reconciler"
+	masterretention "github.com/heckertobias/orkestra/internal/master/retention"
 	"github.com/heckertobias/orkestra/internal/master/store"
 	"github.com/heckertobias/orkestra/internal/shared/gen/orkestra/v1/orkestrav1connect"
 	"github.com/heckertobias/orkestra/internal/shared/version"
@@ -54,6 +55,11 @@ func main() {
 
 		secureCookies = flag.Bool("secure-cookies", envBoolOrDefault("ORKESTRA_SECURE_COOKIES", true),
 			"Set the Secure attribute on session/OIDC cookies (disable only for plain-HTTP local dev)")
+
+		eventsRetentionDays = flag.Int("events-retention-days", envIntOrDefault("ORKESTRA_EVENTS_RETENTION_DAYS", 30),
+			"Days to keep rows in the events table (0 = keep forever); overridden by the UI setting when set")
+		auditRetentionDays = flag.Int("audit-retention-days", envIntOrDefault("ORKESTRA_AUDIT_RETENTION_DAYS", 0),
+			"Days to keep rows in the audit log (0 = keep forever, the default); overridden by the UI setting when set")
 	)
 	flag.Parse()
 
@@ -206,6 +212,16 @@ func main() {
 	// --- Master Reconciler ---
 	rec := masterreconciler.New(db, registry, 15*time.Second)
 	go rec.Run(ctx)
+
+	// --- Retention janitor ---
+	// Keeps events/audit_log/sessions bounded. The windows here are only the startup
+	// defaults; an admin-set value in server_config wins and is picked up on the next sweep.
+	envEventsDays := retentionDays("events-retention-days", *eventsRetentionDays, 30)
+	envAuditDays := retentionDays("audit-retention-days", *auditRetentionDays, 0)
+	slog.Info("retention windows",
+		"events_days", envEventsDays, "audit_days", envAuditDays, "note", "0 = keep forever")
+	ret := masterretention.New(db, time.Hour, envEventsDays, envAuditDays)
+	go ret.Run(ctx)
 
 	// --- OIDC Provider ---
 	// The redirect/post-logout URLs must be browser-reachable and — for OIDC — match the URI
@@ -371,6 +387,28 @@ func envBoolOrDefault(key string, def bool) bool {
 		}
 	}
 	return def
+}
+
+// envIntOrDefault parses an integer env var, falling back to def when unset or unparseable.
+func envIntOrDefault(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+// retentionDays validates a configured retention window in days. Negative values are not a
+// way to express anything — 0 already means "keep forever" — so they are rejected in favour
+// of the built-in default rather than silently becoming a deletion rule.
+func retentionDays(flagName string, v, def int) int {
+	if v < 0 {
+		slog.Warn("ignoring negative retention window, using the default",
+			"flag", flagName, "value", v, "default", def)
+		return def
+	}
+	return v
 }
 
 // normalizePublicURL trims surrounding whitespace and any trailing slash from the configured

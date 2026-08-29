@@ -76,16 +76,39 @@ export function SettingsPage() {
 
 // ─── Server / General Tab ─────────────────────────────────────────────────────
 
+// Retention windows have three states on the wire: -1 inherits the env default (shown as an
+// empty field), 0 keeps rows forever, and a positive value is a number of days. Connect's JSON
+// codec omits zero values, so an absent field reads back as 0.
+const RETENTION_UNSET = -1
+
+function retentionToInput(v: unknown): string {
+  const n = Number(v ?? 0)
+  return Number.isFinite(n) && n >= 0 ? String(n) : ''
+}
+
+function retentionFromInput(v: string): number {
+  const trimmed = v.trim()
+  if (trimmed === '') return RETENTION_UNSET
+  const n = Number(trimmed)
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : RETENTION_UNSET
+}
+
 function ServerTab() {
   const { toast } = useToast()
   const [publicUrl, setPublicUrl] = useState('')
+  const [eventsRetention, setEventsRetention] = useState('')
+  const [auditRetention, setAuditRetention] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     connectPost('GetServerConfig', {})
       .then(r => r.json())
-      .then(d => setPublicUrl(String(d.publicUrl ?? d.public_url ?? '')))
+      .then(d => {
+        setPublicUrl(String(d.publicUrl ?? d.public_url ?? ''))
+        setEventsRetention(retentionToInput(d.eventsRetentionDays ?? d.events_retention_days))
+        setAuditRetention(retentionToInput(d.auditRetentionDays ?? d.audit_retention_days))
+      })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
@@ -94,7 +117,13 @@ function ServerTab() {
     e.preventDefault()
     setBusy(true)
     try {
-      const res = await connectPost('UpdateServerConfig', { public_url: publicUrl })
+      // UpdateServerConfig upserts every column, so the form must always post the full
+      // config — sending only public_url would reset the retention windows.
+      const res = await connectPost('UpdateServerConfig', {
+        public_url: publicUrl,
+        events_retention_days: retentionFromInput(eventsRetention),
+        audit_retention_days: retentionFromInput(auditRetention),
+      })
       if (!res.ok) throw new Error(await res.text())
       toast('Server configuration saved', 'success')
     } catch (err) {
@@ -114,6 +143,22 @@ function ServerTab() {
       >
         <input value={publicUrl} onChange={e => setPublicUrl(e.target.value)}
           className="input" placeholder="https://orkestra.example.com" />
+      </Field>
+
+      <Field
+        label="Event retention (days)"
+        hint="How long the event feed keeps its history. Overrides the ORKESTRA_EVENTS_RETENTION_DAYS env var; leave blank to use it. 0 keeps events forever."
+      >
+        <input value={eventsRetention} onChange={e => setEventsRetention(e.target.value)}
+          type="number" min="0" className="input" placeholder="30" />
+      </Field>
+
+      <Field
+        label="Audit log retention (days)"
+        hint="How long audit entries are kept. Overrides the ORKESTRA_AUDIT_RETENTION_DAYS env var; leave blank to use it. 0 keeps the audit log forever, which is the default — back the database up before shortening this, deleted entries are gone."
+      >
+        <input value={auditRetention} onChange={e => setAuditRetention(e.target.value)}
+          type="number" min="0" className="input" placeholder="0" />
       </Field>
 
       <button type="submit" disabled={busy}

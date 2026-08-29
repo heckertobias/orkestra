@@ -19,7 +19,16 @@ type Querier interface {
 	CountSecretBindings(ctx context.Context, secretID string) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	DeleteAssignment(ctx context.Context, arg DeleteAssignmentParams) error
+	// Deletes at most batch_size audit entries older than cutoff. Only ever called when an
+	// admin has explicitly configured an audit retention window.
+	DeleteAuditLogBefore(ctx context.Context, arg DeleteAuditLogBeforeParams) (int64, error)
 	DeleteAvailableUpdate(ctx context.Context, arg DeleteAvailableUpdateParams) error
+	// Deletes at most batch_size events older than cutoff. Bounded so the retention job
+	// never holds a long lock; the caller loops until a batch comes back short.
+	DeleteEventsBefore(ctx context.Context, arg DeleteEventsBeforeParams) (int64, error)
+	// Deletes at most batch_size sessions whose expiry has passed. Expired rows can no longer
+	// authenticate anyone (GetSession filters on expires_at), so they are pure ballast.
+	DeleteExpiredSessions(ctx context.Context, arg DeleteExpiredSessionsParams) (int64, error)
 	DeleteRoleBinding(ctx context.Context, id string) error
 	DeleteSecret(ctx context.Context, id string) error
 	DeleteUserByID(ctx context.Context, id string) error

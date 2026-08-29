@@ -277,13 +277,24 @@ Covered today:
 | Authentication | `auth.login`, `auth.logout`, `auth.change_password` |
 | Users | `user.create`, `user.delete`, `user.update_profile`, `user.email_changed`, `user.send_password_link` |
 | Secrets | `secret.create`, `secret.update`, `secret.delete`, `secret.reveal` |
+| Configuration | `config.update` (deployment-wide settings, incl. the retention windows; the resulting settings are snapshotted in `after_json`) |
 
 Stack, assignment, server, and role-binding mutations are not audited yet — that gap is worth
 keeping in mind when using the audit log for change tracking.
 
-Secret values never appear in audit entries. The log is append-only from the application's
-perspective: there is no delete or update path in the store, only `InsertAuditLog`. The UI provides
-a searchable view for admins.
+Secret values never appear in audit entries. There is no update path and no API that deletes
+entries — the only writer is `InsertAuditLog`. The UI provides a searchable view for admins.
+
+### Retention
+
+The one thing that removes audit entries is the Master's retention janitor, and it is **off by
+default**: `audit_retention_days` is `0` (keep forever) unless an admin sets a window in
+*Settings → General* or an operator sets `ORKESTRA_AUDIT_RETENTION_DAYS`. Enabling it is itself
+audited as `config.update`, so a shortened window is traceable to whoever set it.
+
+Deleted entries are gone — there is no archive. Back the database up (see
+[08-deployment.md](08-deployment.md) § Backup & Recovery) before shortening the window, and treat
+the backup as the audit archive if you need history beyond the retention period.
 
 ---
 

@@ -111,8 +111,8 @@ Useful context before hunting for "missing" code — these are known gaps, not b
   `drift_detected` / `drift_description` are still never set, so drift stays invisible in the UI.
   Unmanaged containers (no orkestra labels) are not reported either.
 - **Fleet updates.** Only the schema and the Master-side persistence of reported availability.
-- **Audit coverage.** Only auth/user and secret actions are audited; stack/server/role mutations
-  are not.
+- **Audit coverage.** Only auth/user, secret, and server-config actions are audited;
+  stack/server/role mutations are not.
 
 ## Where to look on GitHub
 
@@ -129,7 +129,7 @@ Issues are grouped by milestone (**Beta** → **1.0** → **Post-1.0**) and labe
 | Inventory, drift, resources | #29 populate `agent_state` · #28 drift reporting · #59 resource inventory · #60 targeted delete · #34 prune · #63 forward Docker events |
 | Secrets | #22 deliver to deployments · #23 OpenBao backend · #33 rotation & history |
 | Auth & security | #83 explicit CSRF defence · #84 rate-limit all public endpoints + trusted client IP · #85 audit coverage for stack/server/admin mutations · #35 revocation propagation · #36 metrics endpoint auth |
-| Master & API | #30 pagination · #78 audit/event retention · #79 offline + `DeleteServer` semantics · #80 master/agent version compatibility · #32 backend test coverage |
+| Master & API | #30 pagination · #79 offline + `DeleteServer` semantics · #80 master/agent version compatibility · #32 backend test coverage |
 | Web UI | #46 route preloading · #47 component tests · #48 use generated Connect clients · #49 Playwright E2E |
 | Updates & fleet ops | #9 update system · #31 backup & restore · #82 disaster-recovery runbook |
 | Packaging & keys | #24 interactive KeySource · #25 KMS KeySource · #26 more packaging channels · #27 reproducible builds |
@@ -146,7 +146,8 @@ gh issue view 70                              # details of one issue
 - **Module path is `github.com/heckertobias/orkestra`** and **runtime env vars use the `ORKESTRA_`
   prefix** (e.g. `ORKESTRA_UI_ADDR`, `ORKESTRA_AGENT_ADDR`, `ORKESTRA_METRICS_ADDR`,
   `ORKESTRA_AGENT_DATA`, `ORKESTRA_DATABASE_URL`, `ORKESTRA_MASTER_KEY_FILE`,
-  `ORKESTRA_SECURE_COOKIES`, `ORKESTRA_PUBLIC_URL`, `ORKESTRA_AGENT_TLS_SANS`).
+  `ORKESTRA_SECURE_COOKIES`, `ORKESTRA_PUBLIC_URL`, `ORKESTRA_AGENT_TLS_SANS`,
+  `ORKESTRA_EVENTS_RETENTION_DAYS`, `ORKESTRA_AUDIT_RETENTION_DAYS`).
 - The agent binary is subcommand-based: `orkestra-agent serve|enroll`. The master takes flags only.
 - Default ports: `4440` Agent gRPC (mTLS, HTTP/2; 4440 = orchestra concert pitch A440), `8080`
   UI/API, `9090` Master metrics, `9091` Agent metrics (federated through the Master, never scraped

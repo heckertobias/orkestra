@@ -155,7 +155,7 @@ on `localhost:5173` and the Master (built with `-tags dev`) proxies to it.
 
 | Tab | Contents |
 |---|---|
-| General | Public URL (browser-facing base URL used for OIDC redirect, email links, setup link) |
+| General | Public URL (browser-facing base URL used for OIDC redirect, email links, setup link); event and audit-log retention in days (blank = use the env default, 0 = keep forever) |
 | OIDC | Issuer, client ID/secret, scopes, groups claim, group→role mapping, enable/disable |
 | Password policy | Min length, min/max for special characters, digits, upper and lower case |
 | SMTP | Host, port, STARTTLS, username, password, from address, enable/disable |

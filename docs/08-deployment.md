@@ -33,6 +33,8 @@ directly — see **Federated agent metrics** below.
 | `orkestra_api_requests_total` | Counter | UI API requests by `method`, `status` |
 | `orkestra_api_duration_seconds` | Histogram | UI API latency |
 | `orkestra_secret_resolves_total` | Counter | Secret provider calls by `provider`, `status` |
+| `orkestra_retention_deleted_rows_total` | Counter | Rows deleted by the retention job by `table` |
+| `orkestra_retention_last_success_timestamp_seconds` | Gauge | Unix time of the last clean retention sweep |
 
 **Agent metrics:**
 
@@ -334,6 +336,8 @@ ORKESTRA_AGENT_ADDR=0.0.0.0:4440
 ORKESTRA_UI_ADDR=0.0.0.0:8080
 ORKESTRA_PUBLIC_URL=https://orkestra.example.com   # startup default; overridable in the UI
 ORKESTRA_AGENT_TLS_SANS=orkestra.example.com
+ORKESTRA_EVENTS_RETENTION_DAYS=30                  # startup default; overridable in the UI
+ORKESTRA_AUDIT_RETENTION_DAYS=0                    # 0 = keep the audit log forever (default)
 ```
 
 Agent metrics need **no** inbound port on the agent hosts — they are federated through the
@@ -477,6 +481,40 @@ default `/etc/orkestra/<tool>/env`, and a system user where needed.
 | `codeql.yml` | CodeQL analysis |
 | `release.yml` (tag `v*`) | goreleaser: binaries, archives, packages, images |
 | `pages.yml` | Publishes the signed apt/rpm repository to GitHub Pages |
+
+---
+
+## Data Retention
+
+Three tables on the Master are append-only and would otherwise grow forever: `events` (the live
+event feed), `audit_log`, and `sessions`. A janitor sweeps them **every hour**, deleting rows past
+their window in batches of 5 000 so it never holds a long lock on a table the UI reads from. A large
+backlog — the first sweep after enabling retention on an old deployment — is drained over several
+sweeps rather than one long burst.
+
+| Table | Default | Configurable |
+|---|---|---|
+| `events` | 30 days | yes |
+| `audit_log` | **keep forever** | yes, opt-in |
+| `sessions` | expired rows are always removed | no — `expires_at` is the rule |
+
+The two configurable windows use a three-state value: **blank/`-1`** inherits the startup default,
+**`0`** keeps rows forever, and any positive value is a number of days. Set them in order of
+precedence:
+
+1. **UI** — *Settings → General → Event retention / Audit log retention* (admin, stored in
+   `server_config`). Applied within the hour; no Master restart needed.
+2. **`ORKESTRA_EVENTS_RETENTION_DAYS` / `ORKESTRA_AUDIT_RETENTION_DAYS`** — the startup defaults
+   when no UI value is set (declarative/GitOps). Defaults: `30` and `0`.
+
+**The audit log is opt-in on purpose.** It is the compliance surface, so nothing deletes from it
+until someone asks for it, and enabling a window is itself audited as `config.update`. There is no
+archive: deleted rows are gone. If you need history beyond the window, the database backup below is
+the archive — take it before shortening the window.
+
+Watch `orkestra_retention_deleted_rows_total` and
+`orkestra_retention_last_success_timestamp_seconds` (see *Observability → Metrics*) to confirm the
+job is running; a stale `last_success` gauge means sweeps are failing.
 
 ---
 
