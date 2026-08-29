@@ -34,6 +34,17 @@ jobs:
       - name: Generate sqlc
         run: make sqlc
 
+      # internal/shared/gen/ and the sqlc output are committed. If regenerating
+      # changes them, the .proto/SQL sources and the committed code disagree.
+      - name: Verify generated code is up to date
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Generated code is out of date. Run 'make proto && make sqlc' and commit the result."
+            git status --porcelain
+            git diff
+            exit 1
+          fi
+
       - name: go vet
         run: go vet -tags dev ./...
 

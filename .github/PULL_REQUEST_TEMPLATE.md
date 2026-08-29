@@ -11,7 +11,7 @@
 ## Checklist
 
 - [ ] I read the [contributing conventions](../CLAUDE.md) (module path, `ORKESTRA_` env prefix, subset of supported Compose fields).
-- [ ] Regenerated code where needed (`make proto` / `make sqlc`) — generated dirs are gitignored.
+- [ ] Regenerated code where needed (`make proto` / `make sqlc`) **and committed the result** — the Go output is checked in; CI fails if it is out of date.
 - [ ] `make test` passes (`make test-integration` if Docker-related).
 - [ ] `make lint` and `make vet` pass.
 - [ ] Docs under `docs/` updated if behavior or protocol changed.

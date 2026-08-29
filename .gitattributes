@@ -1,0 +1,5 @@
+# Generated code: collapse it in GitHub diffs and keep it out of the language
+# statistics. These files are committed so the repo builds without buf/sqlc, but
+# they are never edited by hand — review the .proto / .sql sources instead.
+internal/shared/gen/** linguist-generated=true
+internal/master/store/*.sql.go linguist-generated=true

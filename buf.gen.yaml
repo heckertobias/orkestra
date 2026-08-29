@@ -4,22 +4,26 @@ managed:
   override:
     - file_option: go_package_prefix
       value: github.com/heckertobias/orkestra/internal/shared/gen
+# Plugin versions are pinned on purpose: internal/shared/gen/ is committed, and
+# CI fails if a regeneration would change it. An unpinned `remote:` resolves to
+# whatever buf.build publishes that day, so the output would drift and turn CI
+# red without anyone touching a .proto file.
 plugins:
   # Go: protobuf + Connect
-  - remote: buf.build/protocolbuffers/go
+  - remote: buf.build/protocolbuffers/go:v1.36.12
     out: internal/shared/gen
     opt:
       - paths=source_relative
-  - remote: buf.build/connectrpc/go
+  - remote: buf.build/connectrpc/go:v1.20.0
     out: internal/shared/gen
     opt:
       - paths=source_relative
   # TypeScript: protobuf-es + Connect-es
-  - remote: buf.build/bufbuild/es
+  - remote: buf.build/bufbuild/es:v2.14.0
     out: web/gen
     opt:
       - target=ts
-  - remote: buf.build/connectrpc/es
+  - remote: buf.build/connectrpc/es:v1.6.1
     out: web/gen
     opt:
       - target=ts
