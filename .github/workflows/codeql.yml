@@ -43,15 +43,13 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
 
-      # Manual build for Go: codegen first, then build with the `dev` tag so the
-      # web/dist go:embed is swapped for the Vite proxy (dist is not present in CI).
+      # Manual build for Go with the `dev` tag, so the web/dist go:embed is swapped
+      # for the Vite proxy (dist is not present in CI). The generated protobuf and
+      # sqlc code is committed, so no codegen is needed here; CI verifies it is
+      # up to date.
       - name: Build Go
         if: matrix.language == 'go'
-        run: |
-          go install github.com/bufbuild/buf/cmd/buf@v1.71.0
-          go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
-          make proto && make sqlc
-          go build -tags dev ./...
+        run: go build -tags dev ./...
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
