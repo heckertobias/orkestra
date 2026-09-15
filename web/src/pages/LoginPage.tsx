@@ -139,15 +139,12 @@ export function LoginPage() {
               </div>
             )}
 
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="block text-xs" style={{ color: 'var(--text-muted)' }}>Password</label>
-                {!isSetup && (
-                  <Link to="/forgot-password" className="text-xs hover:underline" style={{ color: 'var(--accent)' }}>
-                    Forgot password?
-                  </Link>
-                )}
-              </div>
+            {/* The "Forgot password?" link renders after the password input and is pulled up
+                into the label row, so Tab goes Username → Password → Forgot → Sign in.
+                Keeping it in the label row in DOM order put it between the two fields and
+                stole the Tab from Username (#105). */}
+            <div className="relative">
+              <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Password</label>
               <input
                 type="password"
                 value={password}
@@ -157,6 +154,11 @@ export function LoginPage() {
                 autoComplete={isSetup ? 'new-password' : 'current-password'}
                 required
               />
+              {!isSetup && (
+                <Link to="/forgot-password" className="absolute top-0 right-0 text-xs hover:underline" style={{ color: 'var(--accent)' }}>
+                  Forgot password?
+                </Link>
+              )}
             </div>
 
             <button

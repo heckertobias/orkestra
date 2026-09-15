@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Key, Shield, Plus, Trash2, Eye, EyeOff, Copy, Lock, Mail, Globe } from 'lucide-react'
 import { useToast } from '@/components/ui/toast-context'
+import { copyToClipboard } from '@/lib/clipboard'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -399,7 +400,10 @@ function APIKeysTab() {
           <p className="text-xs font-medium mb-2" style={{ color: 'var(--accent)' }}>New API key — copy it now</p>
           <div className="flex gap-2 items-center">
             <code className="flex-1 text-xs break-all" style={{ color: 'var(--text)' }}>{newKey}</code>
-            <button onClick={() => { navigator.clipboard.writeText(newKey); toast('Copied!', 'success') }}
+            <button onClick={async () => {
+              if (await copyToClipboard(newKey)) toast('Copied!', 'success')
+              else toast('Could not copy — select the key and copy it manually', 'error')
+            }}
               className="p-1.5 rounded hover:bg-[var(--surface-2)]" style={{ color: 'var(--text-muted)' }}>
               <Copy size={14} />
             </button>
