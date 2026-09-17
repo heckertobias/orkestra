@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { X, Copy, Check, Terminal } from 'lucide-react'
+import { copyToClipboard } from '@/lib/clipboard'
 
 interface AddServerDialogProps {
   onClose: () => void
@@ -38,13 +39,13 @@ export function AddServerDialog({ onClose }: AddServerDialogProps) {
     : ''
 
   async function copy(text: string, key: string) {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(key)
-      setTimeout(() => setCopied(c => (c === key ? null : c)), 1500)
-    } catch {
-      /* clipboard unavailable — user can select manually */
+    if (!(await copyToClipboard(text))) {
+      setError('Could not copy to the clipboard — select the text and copy it manually.')
+      return
     }
+    setError(null)
+    setCopied(key)
+    setTimeout(() => setCopied(c => (c === key ? null : c)), 1500)
   }
 
   async function handleCreate() {
