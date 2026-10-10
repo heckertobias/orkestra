@@ -6,17 +6,17 @@ toolchain go1.26.4
 
 require (
 	connectrpc.com/connect v1.21.0
-	github.com/compose-spec/compose-go/v2 v2.15.0
+	github.com/compose-spec/compose-go/v2 v2.16.1
 	github.com/containerd/errdefs v1.0.0
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/moby/moby/api v1.56.0
-	github.com/moby/moby/client v0.6.0
+	github.com/moby/moby/api v1.56.1
+	github.com/moby/moby/client v0.6.1
 	github.com/pressly/goose/v3 v3.28.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.3
-	github.com/prometheus/common v0.71.0
+	github.com/prometheus/common v0.72.0
 	golang.org/x/crypto v0.57.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/time v0.16.0
