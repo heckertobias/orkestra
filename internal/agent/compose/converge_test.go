@@ -8,7 +8,7 @@ import (
 )
 
 func TestSpecHashIncludesImageID(t *testing.T) {
-	svc := composetypes.ServiceConfig{Image: "app:latest"}
+	svc := composetypes.ServiceConfig{ContainerSpec: composetypes.ContainerSpec{Image: "app:latest"}}
 
 	// A repointed tag (same string, new resolved ID) must change identity so the container is
 	// recreated — the core of #73.
