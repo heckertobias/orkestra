@@ -5,7 +5,7 @@ go 1.26.0
 toolchain go1.26.4
 
 require (
-	connectrpc.com/connect v1.21.0
+	connectrpc.com/connect v1.21.1
 	github.com/compose-spec/compose-go/v2 v2.16.1
 	github.com/containerd/errdefs v1.0.0
 	github.com/coreos/go-oidc/v3 v3.21.0
@@ -16,7 +16,7 @@ require (
 	github.com/pressly/goose/v3 v3.29.0
 	github.com/prometheus/client_golang v1.25.0
 	github.com/prometheus/client_model v0.6.3
-	github.com/prometheus/common v0.72.0
+	github.com/prometheus/common v0.72.1
 	golang.org/x/crypto v0.58.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/time v0.16.0
